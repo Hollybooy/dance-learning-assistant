@@ -202,10 +202,13 @@ async function ensurePose(videoId) {
   throw new Error('骨架分析超时');
 }
 
+// 纠错回放页使用回放列表，没有底部轮播，这里只渲染实际存在的轨道
+const CAROUSEL_TRACKS = ['select-carousel-track', 'learn-carousel-track'];
+
 function renderCarousels() {
-  const tracks = ['select-carousel-track', 'learn-carousel-track', 'correct-carousel-track'];
-  tracks.forEach((id) => {
+  CAROUSEL_TRACKS.forEach((id) => {
     const track = $(id);
+    if (!track) return;
     track.innerHTML = '';
     if (!state.segments.length) {
       track.innerHTML =
