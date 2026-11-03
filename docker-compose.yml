@@ -1,0 +1,46 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DANCEMATE_HOST: 0.0.0.0
+      DANCEMATE_PORT: "8000"
+      DANCEMATE_SEGMENT_SECONDS: "${SEGMENT_SECONDS:-10}"
+      DANCEMATE_RECORD_FPS: "${RECORD_FPS:-12}"
+      DANCEMATE_MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-800}"
+    volumes:
+      # 上传的教学视频、骨架缓存、练习回放都持久化在这里
+      - ./backend/data:/app/backend/data
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health').read()
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?请先在 .env 中设置 DOMAIN}"
+      EMAIL: "${EMAIL:-}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

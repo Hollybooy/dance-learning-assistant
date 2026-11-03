@@ -14,6 +14,9 @@ backend/*.log
 backend/*.err
 backend/tmpdl/
 
+# 部署配置（含域名/邮箱）
+.env
+
 # 系统文件
 .DS_Store
 Thumbs.db

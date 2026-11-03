@@ -75,6 +75,10 @@ dance-learning-assistant/
 │   ├── pose.js       # 骨架绘制 + 轮廓映射
 │   ├── live.js       # 低延时 WebSocket 实时链路
 │   └── replay.js     # 回放播放器
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
+├── deploy/Caddyfile   # 自动 HTTPS + WebSocket 反代
 ├── backend/
 │   ├── run.py
 │   ├── requirements.txt
@@ -93,6 +97,53 @@ dance-learning-assistant/
 │       ├── videos/<id>/{source.mp4, meta.json, pose.json}
 │       └── sessions/<id>/{frames/*.jpg, poses.json, meta.json}
 ```
+
+## 部署（Docker + Caddy，自动 HTTPS）
+
+前置条件：
+
+1. 一台能运行 Docker 的服务器（Linux，2 核 2G 以上；无 GPU 也能跑，CPU 推理约 20~40ms/帧）。
+2. 一个域名，DNS **A 记录指向服务器公网 IP**。
+3. 服务器安全组/防火墙放行 **80、443**（80 用于 Let's Encrypt 验证）。
+
+```bash
+# 1. 上传代码（或 git clone）
+git clone https://github.com/Hollybooy/dance-learning-assistant.git
+cd dance-learning-assistant
+
+# 2. 配置域名
+cp .env.example .env
+vi .env          # DOMAIN=dance.example.com  EMAIL=you@example.com
+
+# 3. 启动（首次会构建镜像并下载模型，约 3~5 分钟）
+docker compose up -d --build
+
+# 4. 查看证书 / 日志
+docker compose logs -f caddy
+docker compose ps
+```
+
+启动后访问 `https://<你的域名>`，Caddy 会自动申请并续期 Let's Encrypt 证书（HTTPS 是摄像头可用的前提）。
+
+要点：
+
+- `reverse_proxy` 已设置 `flush_interval -1`，避免实时骨架数据被缓冲；WebSocket 由 Caddy 自动升级，无需额外配置。
+- 上传视频与练习回放持久化在宿主机 `./backend/data`，重建容器不丢数据。
+- `run.py` 只允许单 worker（MediaPipe 引擎为进程内单例），扩缩容请横向加机器而不是加 worker。
+- 中国大陆服务器绑定域名需备案；仅 IP 无法签发 Let's Encrypt 证书。
+- 容器默认以 root 运行，数据文件属主为 root；如遇权限问题：`sudo chown -R $USER:$USER backend/data`。
+
+### 临时公网演示（内网穿透，免域名）
+
+```bash
+# 本机先启动服务
+python backend/run.py
+
+# 另开终端，cloudflared 快速隧道（自带 HTTPS，地址随机且进程退出即失效）
+cloudflared tunnel --url http://127.0.0.1:8000
+```
+
+适合临时给他人演示，不适合长期使用（地址不固定、带宽有限）。
 
 ## API
 

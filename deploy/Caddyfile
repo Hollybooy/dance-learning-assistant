@@ -1,0 +1,25 @@
+{
+	email {$EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# WebSocket / 长连接：关闭响应缓冲，避免实时骨架被攒包
+	reverse_proxy app:8000 {
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# 摄像头需要，同源即可
+		Permissions-Policy "camera=(self), microphone=()"
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
