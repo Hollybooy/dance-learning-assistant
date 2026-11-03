@@ -27,6 +27,8 @@ async def get_session(session_id: str):
 
 @router.delete("/{session_id}")
 async def delete_session(session_id: str):
+    if not safe_id(session_id):
+        raise HTTPException(400, "非法回放 ID")
     if not (session_store.root / session_id).exists():
         raise HTTPException(404, "回放不存在")
     session_store.delete(session_id)

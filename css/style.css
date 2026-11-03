@@ -458,6 +458,21 @@ body {
 }
 .clip-item:hover { border-color: #3a4552; }
 .clip-item.active { border-color: var(--accent); }
+.clip-item { position: relative; }
+.clip-delete {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: background .15s, color .15s;
+}
+.clip-delete:hover { background: #3a2530; color: #ff8aa5; }
 .clip-title { font-size: 13px; color: var(--text); margin-bottom: 4px; }
 .clip-meta { font-size: 11px; color: var(--text-dim); }
 .clip-nav { display: flex; gap: 8px; justify-content: center; }

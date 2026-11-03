@@ -656,8 +656,13 @@ async function refreshSessions(selectFirst = true) {
       item.innerHTML = `
         <div class="clip-title">${session.title}</div>
         <div class="clip-meta">${formatTime(session.duration)} · ${session.frame_count} 帧</div>
+        <button class="clip-delete" title="删除此回放">✕ 删除</button>
       `;
       item.addEventListener('click', () => loadSession(session.id));
+      item.querySelector('.clip-delete').addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteSession(session.id);
+      });
       list.appendChild(item);
     });
     if (selectFirst) {
@@ -668,6 +673,21 @@ async function refreshSessions(selectFirst = true) {
     }
   } catch (error) {
     list.innerHTML = `<div class="empty-hint">读取回放失败：${error.message}</div>`;
+  }
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm('确定删除这条练习回放吗？删除后不可恢复。')) return;
+  try {
+    await api.deleteSession(sessionId);
+    if (state.currentSessionId === sessionId) {
+      state.currentSessionId = null;
+      player.pause();
+      $('replay-status').textContent = '回放已删除';
+    }
+    refreshSessions(false);
+  } catch (error) {
+    alert(`删除失败：${error.message}`);
   }
 }
 
