@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 运行时数据（上传视频、骨架缓存、练习回放）
+backend/data/
+
+# 姿态模型缓存与安装日志
+backend/models/
+backend/*.log
+backend/tmpdl/
+
+# 系统文件
+.DS_Store
+Thumbs.db

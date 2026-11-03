@@ -14,6 +14,7 @@
       <button class="tab" data-view="learning">跟练学习</button>
       <button class="tab" data-view="correct">纠错回放</button>
     </nav>
+    <span class="badge" id="conn-badge">未连接</span>
   </header>
 
   <!-- ================= 视频选择页 (selecting) ================= -->
@@ -32,6 +33,11 @@
       </aside>
 
       <section class="selecting-main">
+        <div class="pane-head">
+          <div class="pane-title">教学视频片段</div>
+          <span class="badge" id="video-status">未选择视频</span>
+        </div>
+
         <!-- 轮播图：将导入的视频按固定时间间隔切成片段 -->
         <div class="carousel" id="select-carousel">
           <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
@@ -52,6 +58,8 @@
             <input type="file" id="upload-input" accept="video/*" hidden />
           </label>
         </div>
+        <div class="search-results" id="search-results"></div>
+        <div class="status-line" id="library-status">正在连接后端…</div>
       </section>
     </div>
   </main>
@@ -60,15 +68,37 @@
   <main id="view-learning" class="view">
     <div class="learning-layout">
       <section class="pane">
-        <div class="pane-title">教学视频的当前片段</div>
-        <video id="teach-video" class="video-frame" controls playsinline></video>
-        <button class="switch-btn left" id="prev-seg" aria-label="向左切换上一个片段">&#10094; 上一片段</button>
+        <div class="pane-head">
+          <div class="pane-title">教学视频的当前片段</div>
+          <span class="badge" id="teach-badge">--</span>
+        </div>
+        <div class="video-wrap">
+          <video id="teach-video" class="video-frame" controls playsinline></video>
+          <canvas id="teach-overlay" class="overlay-canvas"></canvas>
+        </div>
+        <div class="seg-controls">
+          <button class="switch-btn left" id="prev-seg" aria-label="向左切换上一个片段">&#10094; 上一片段</button>
+          <span class="seg-indicator" id="seg-indicator">-- / --</span>
+          <button class="switch-btn right" id="next-seg" aria-label="向右切换下一个片段">下一片段 &#10095;</button>
+        </div>
       </section>
 
       <section class="pane">
-        <div class="pane-title">摄像头捕捉的实时画面</div>
-        <video id="camera-video" class="video-frame mirrored" autoplay muted playsinline></video>
-        <button class="switch-btn right" id="next-seg" aria-label="向右切换下一个片段">下一片段 &#10095;</button>
+        <div class="pane-head">
+          <div class="pane-title">摄像头捕捉的实时画面</div>
+          <div class="pane-tools">
+            <span class="badge" id="latency-badge">未开启</span>
+            <button class="btn record small" id="record-btn">● 开始录制</button>
+          </div>
+        </div>
+        <div class="video-wrap">
+          <video id="camera-video" class="video-frame mirrored" autoplay muted playsinline></video>
+          <canvas id="camera-overlay" class="overlay-canvas mirrored"></canvas>
+        </div>
+        <div class="seg-controls">
+          <label class="toggle"><input type="checkbox" id="compare-toggle" checked /> 显示教学对比轮廓</label>
+          <button class="switch-btn right" id="next-seg-2">下一片段 &#10095;</button>
+        </div>
       </section>
     </div>
 
@@ -85,29 +115,37 @@
   <main id="view-correct" class="view">
     <div class="correct-layout">
       <aside class="clip-list">
-        <div class="clip-item" id="clip-1">教学视频片段 1</div>
-        <div class="clip-item" id="clip-2">教学视频片段 2</div>
+        <div class="pane-head">
+          <div class="pane-title">练习回放</div>
+          <button class="btn ghost small" id="refresh-sessions">刷新</button>
+        </div>
+        <div class="clip-items" id="session-list">
+          <div class="empty-hint">暂无录制，去「跟练学习」页录制一段吧</div>
+        </div>
         <div class="clip-nav">
-          <button class="switch-btn left small" id="prev-clip">&#10094;</button>
-          <button class="switch-btn right small" id="next-clip">&#10095;</button>
+          <button class="switch-btn small" id="prev-clip">&#10094; 上一个</button>
+          <button class="switch-btn small" id="next-clip">下一个 &#10095;</button>
         </div>
       </aside>
 
       <section class="pane wide">
-        <div class="pane-title">摄像头捕捉的画面回放</div>
-        <video id="replay-video" class="video-frame" controls playsinline></video>
+        <div class="pane-head">
+          <div class="pane-title">摄像头捕捉的画面回放</div>
+          <span class="badge" id="replay-status">未选择回放</span>
+        </div>
+        <div class="replay-wrap">
+          <canvas id="replay-canvas"></canvas>
+        </div>
+        <div class="replay-controls">
+          <button class="btn primary small" id="replay-toggle">播放</button>
+          <input type="range" id="replay-seek" min="0" max="1000" value="0" step="1" />
+          <span class="time" id="replay-time">00:00 / 00:00</span>
+          <label class="toggle"><input type="checkbox" id="replay-compare" checked /> 教学轮廓</label>
+        </div>
       </section>
-    </div>
-
-    <div class="carousel bottom" id="correct-carousel">
-      <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
-      <div class="carousel-track" id="correct-carousel-track">
-        <div class="carousel-slide placeholder"><span>暂无片段</span></div>
-      </div>
-      <button class="carousel-arrow right" aria-label="下一个">&#10095;</button>
     </div>
   </main>
 
-  <script src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
