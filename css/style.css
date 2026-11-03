@@ -149,6 +149,8 @@ body {
   transition: all .15s;
 }
 .chat-item:hover, .chat-item.active { background: #2e3946; color: var(--text); }
+.chat-title { font-size: 13px; color: var(--text); line-height: 1.4; }
+.chat-time { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
 .selecting-main {
   flex: 1;

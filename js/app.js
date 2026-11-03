@@ -64,9 +64,81 @@ function prepareCanvas(canvas) {
   return { ctx, width, height };
 }
 
+/* -------------------------------------------------- 聊天历史（学习会话） */
+
+const CHAT_KEY = 'dancemate_chat_sessions';
+
+function loadChatSessions() {
+  try {
+    return JSON.parse(localStorage.getItem(CHAT_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveChatSessions(sessions) {
+  localStorage.setItem(CHAT_KEY, JSON.stringify(sessions.slice(0, 30)));
+}
+
+function renderChatSessions() {
+  const list = $('chat-list');
+  const sessions = loadChatSessions();
+  list.innerHTML = '';
+  if (!sessions.length) {
+    list.innerHTML = '<div class="empty-hint">暂无学习会话，上传教学视频后自动创建</div>';
+    return;
+  }
+  sessions.forEach((session) => {
+    const item = document.createElement('div');
+    item.className = 'chat-item';
+    item.dataset.videoId = session.videoId;
+    item.classList.toggle('active', session.videoId === state.video?.id);
+    item.innerHTML = `
+      <div class="chat-title">${session.title}</div>
+      <div class="chat-time">${session.time}</div>
+    `;
+    item.addEventListener('click', () => openChatSession(session.videoId));
+    list.appendChild(item);
+  });
+}
+
+function upsertChatSession(videoId, title) {
+  const sessions = loadChatSessions().filter((s) => s.videoId !== videoId);
+  sessions.unshift({
+    videoId,
+    title,
+    time: new Date().toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+  });
+  saveChatSessions(sessions);
+  renderChatSessions();
+}
+
+async function openChatSession(videoId) {
+  try {
+    const meta = await api.getVideo(videoId);
+    await selectVideo(meta);
+    setLibraryStatus(`已切换到会话：${meta.title}`);
+  } catch (error) {
+    // 视频已被删除 → 清理失效会话
+    saveChatSessions(loadChatSessions().filter((s) => s.videoId !== videoId));
+    renderChatSessions();
+    setLibraryStatus(`该会话的视频已不存在，已清理记录`);
+  }
+}
+
+$('new-chat-btn').addEventListener('click', () => {
+  $('upload-input').click();
+});
+
 /* ------------------------------------------------------------ 视频库/轮播 */
 
 async function loadLibrary() {
+  renderChatSessions();
   try {
     const { items } = await api.listVideos();
     if (!items.length) {
@@ -91,6 +163,7 @@ async function selectVideo(meta) {
   setVideoStatus(`${meta.title} · ${state.segments.length} 个片段`);
   renderCarousels();
   updateSegIndicator();
+  upsertChatSession(meta.id, meta.title);
 
   if (state.teachCache.has(meta.id)) {
     state.teachFrames = state.teachCache.get(meta.id);
@@ -491,15 +564,6 @@ function stepSession(direction) {
   if (nextIndex === currentIndex) return;
   loadSession(items[nextIndex].dataset.id);
 }
-
-document.querySelectorAll('.chat-item').forEach((item) => {
-  item.addEventListener('click', () => {
-    document.querySelectorAll('.chat-item').forEach((other) => {
-      other.classList.remove('active');
-    });
-    item.classList.add('active');
-  });
-});
 
 document.querySelectorAll('.carousel').forEach((carousel) => {
   const track = carousel.querySelector('.carousel-track');
