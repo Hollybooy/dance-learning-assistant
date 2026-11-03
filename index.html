@@ -70,8 +70,14 @@
           <span class="badge" id="teach-badge">--</span>
         </div>
         <div class="video-wrap">
-          <video id="teach-video" class="video-frame" controls playsinline></video>
+          <video id="teach-video" class="video-frame" playsinline></video>
           <canvas id="teach-overlay" class="overlay-canvas"></canvas>
+        </div>
+        <div class="seg-progress-row">
+          <div class="seg-progress" id="teach-progress">
+            <div class="seg-progress-fill" id="teach-progress-fill"></div>
+          </div>
+          <span class="seg-time" id="seg-time">0:00 / 0:10</span>
         </div>
         <div class="seg-controls">
           <button class="switch-btn left" id="prev-seg" aria-label="向左切换上一个片段">&#10094; 上一片段</button>
@@ -91,6 +97,11 @@
         <div class="video-wrap">
           <video id="camera-video" class="video-frame mirrored" autoplay muted playsinline></video>
           <canvas id="camera-overlay" class="overlay-canvas mirrored"></canvas>
+          <div class="cam-error" id="cam-error" hidden>
+            <div class="cam-error-title" id="cam-error-title">摄像头不可用</div>
+            <div class="cam-error-hint" id="cam-error-hint"></div>
+            <button class="btn small primary" id="cam-retry">重试连接</button>
+          </div>
         </div>
         <div class="seg-controls">
           <label class="toggle"><input type="checkbox" id="compare-toggle" checked /> 显示教学对比轮廓</label>

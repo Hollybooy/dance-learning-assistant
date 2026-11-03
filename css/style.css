@@ -332,6 +332,54 @@ body {
 }
 .seg-indicator { font-size: 12px; color: var(--text-dim); }
 
+/* 片段级进度条（只反映当前片段，可点击/拖动） */
+.seg-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.seg-progress {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: #2c3540;
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+}
+.seg-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.12s linear;
+}
+.seg-time {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-width: 86px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 摄像头错误提示浮层 */
+.cam-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 24px;
+  background: rgba(13, 17, 21, 0.88);
+  z-index: 2;
+}
+.cam-error[hidden] { display: none; }
+.cam-error-title { font-size: 15px; color: var(--text); font-weight: 600; }
+.cam-error-hint { font-size: 12px; color: var(--text-dim); line-height: 1.7; max-width: 420px; }
+
 .switch-btn {
   background: var(--panel-2);
   color: var(--text);

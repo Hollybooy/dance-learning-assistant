@@ -248,6 +248,50 @@ function updateSegIndicator() {
   $('seg-indicator').textContent = total ? `${state.current + 1} / ${total}` : '-- / --';
 }
 
+/* ---- 片段级进度条：只反映当前片段，可点击 / 拖动 ---- */
+
+function updateSegProgress() {
+  const segment = state.segments[state.current];
+  const fill = $('teach-progress-fill');
+  const label = $('seg-time');
+  if (!segment) {
+    fill.style.width = '0%';
+    label.textContent = '-- / --';
+    return;
+  }
+  const t = Math.min(Math.max(teachVideo.currentTime, segment.start), segment.end);
+  const span = segment.end - segment.start;
+  const ratio = span > 0 ? (t - segment.start) / span : 0;
+  fill.style.width = `${Math.min(100, Math.max(0, ratio * 100))}%`;
+  label.textContent = `${formatTime(t - segment.start)} / ${formatTime(span)}`;
+}
+
+let scrubbing = false;
+
+function seekFromPointer(event) {
+  const segment = state.segments[state.current];
+  if (!segment) return;
+  const rect = $('teach-progress').getBoundingClientRect();
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  teachVideo.currentTime = segment.start + ratio * (segment.end - segment.start);
+  updateSegProgress();
+}
+
+$('teach-progress').addEventListener('pointerdown', (event) => {
+  scrubbing = true;
+  event.currentTarget.setPointerCapture(event.pointerId);
+  seekFromPointer(event);
+});
+$('teach-progress').addEventListener('pointermove', (event) => {
+  if (scrubbing) seekFromPointer(event);
+});
+$('teach-progress').addEventListener('pointerup', () => {
+  scrubbing = false;
+});
+['seeked', 'loadedmetadata'].forEach((type) => {
+  teachVideo.addEventListener(type, updateSegProgress);
+});
+
 async function playSegment(index) {
   const segment = state.segments[index];
   if (!segment) return;
@@ -265,15 +309,18 @@ async function playSegment(index) {
     });
   }
   teachVideo.currentTime = segment.start;
+  updateSegProgress();
   teachVideo.play().catch(() => {});
 }
 
 teachVideo.addEventListener('timeupdate', () => {
   const segment = state.segments[state.current];
   if (!segment) return;
+  updateSegProgress();
   if (teachVideo.currentTime >= segment.end - 0.02) {
     teachVideo.pause();
     teachVideo.currentTime = Math.min(segment.end, teachVideo.duration || segment.end);
+    updateSegProgress();
   }
 });
 
@@ -365,7 +412,10 @@ const live = new LivePoseStream({
   },
   onStatus: (text) => {
     $('latency-badge').textContent = text;
-    if (text.includes('断开') || text.includes('不可用')) {
+    if (text.includes('已连接')) {
+      hideCamError();
+      $('conn-badge').textContent = '实时链路在线';
+    } else if (text.includes('断开') || text.includes('不可用')) {
       $('conn-badge').textContent = '实时链路中断';
     }
   },
@@ -384,16 +434,55 @@ const live = new LivePoseStream({
   },
 });
 
-async function ensureLive() {
-  if (live.running) return;
-  try {
-    await live.start();
-  } catch (error) {
-    $('latency-badge').textContent = '摄像头不可用';
-    $('conn-badge').textContent = '未连接';
-    console.warn(error);
+function cameraErrorMessage(error) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return '当前页面环境无法访问摄像头（需要 HTTPS 或 localhost）';
+  }
+  switch (error?.name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      return '摄像头权限被拒绝：点击地址栏左侧的摄像头/锁图标，将摄像头改为"允许"，然后点下方重试';
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return '未检测到摄像头设备，请确认电脑已连接摄像头（或未被设备管理器禁用）';
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return '摄像头被其他程序占用（微信 / 抖音 / 腾讯会议等），关闭后点下方重试';
+    case 'OverconstrainedError':
+      return '摄像头不支持所请求的分辨率，已尝试降级仍失败';
+    default:
+      return `摄像头打开失败：${error?.name || '未知错误'}`;
   }
 }
+
+function showCamError(message) {
+  $('cam-error-title').textContent = '摄像头不可用';
+  $('cam-error-hint').textContent = message;
+  $('cam-error').hidden = false;
+}
+
+function hideCamError() {
+  $('cam-error').hidden = true;
+}
+
+async function ensureLive() {
+  if (live.running) {
+    hideCamError();
+    return;
+  }
+  try {
+    await live.start();
+    hideCamError();
+  } catch (error) {
+    const message = cameraErrorMessage(error);
+    $('latency-badge').textContent = '摄像头不可用';
+    $('conn-badge').textContent = '未连接';
+    showCamError(message);
+    console.warn('camera error:', error);
+  }
+}
+
+$('cam-retry').addEventListener('click', () => ensureLive());
 
 $('compare-toggle').addEventListener('change', (event) => {
   state.compare = event.target.checked;
@@ -402,6 +491,11 @@ $('compare-toggle').addEventListener('change', (event) => {
 $('record-btn').addEventListener('click', () => {
   if (!state.video) {
     alert('请先在「视频选择」页上传或选择一个教学视频');
+    return;
+  }
+  if (!live.running) {
+    // 摄像头还没连上：直接尝试（重新）连接，而不是报"无法录制"
+    ensureLive();
     return;
   }
   if (!state.recording) {

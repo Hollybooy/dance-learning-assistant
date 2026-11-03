@@ -50,9 +50,23 @@ export class LivePoseStream {
         audio: false,
       });
     } catch (error) {
-      this.running = false;
-      this.onStatus?.('摄像头不可用');
-      throw error;
+      // 分辨率/帧率约束不被支持时，降级为"任意摄像头"再试一次
+      if (error?.name === 'OverconstrainedError' || error?.name === 'NotFoundError') {
+        try {
+          this.stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        } catch (fallbackError) {
+          this.running = false;
+          this.onStatus?.('摄像头不可用');
+          throw fallbackError;
+        }
+      } else {
+        this.running = false;
+        this.onStatus?.('摄像头不可用');
+        throw error;
+      }
     }
 
     this.video.srcObject = this.stream;
