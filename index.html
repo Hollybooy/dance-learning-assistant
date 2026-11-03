@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DanceMate · 舞蹈学习助手</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">💃 DanceMate</div>
+    <nav class="nav-tabs">
+      <button class="tab active" data-view="selecting">视频选择</button>
+      <button class="tab" data-view="learning">跟练学习</button>
+      <button class="tab" data-view="correct">纠错回放</button>
+    </nav>
+  </header>
+
+  <!-- ================= 视频选择页 (selecting) ================= -->
+  <main id="view-selecting" class="view active">
+    <div class="selecting-layout">
+      <!-- 左侧：聊天历史记录框 -->
+      <aside class="chat-history">
+        <div class="panel-title">聊天历史记录</div>
+        <div class="chat-list">
+          <div class="chat-item active">迈克尔·杰克逊 月面漫步</div>
+          <div class="chat-item">K-pop 副歌 15 秒片段</div>
+          <div class="chat-item">爵士舞基础转体</div>
+          <div class="chat-item">街舞 Wave 教学</div>
+        </div>
+        <button class="btn ghost small">＋ 新建学习会话</button>
+      </aside>
+
+      <section class="selecting-main">
+        <!-- 轮播图：将导入的视频按固定时间间隔切成片段 -->
+        <div class="carousel" id="select-carousel">
+          <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
+          <div class="carousel-track" id="select-carousel-track">
+            <div class="carousel-slide placeholder">
+              <span>导入视频后将按固定时间间隔切片</span>
+            </div>
+          </div>
+          <button class="carousel-arrow right" aria-label="下一个">&#10095;</button>
+        </div>
+        <p class="hint">轮播图：用于将导入的视频按照固定的时间间隔切成固定的片段</p>
+
+        <div class="search-row">
+          <input type="text" id="search-input" class="search-input" placeholder="在此处搜索教学视频…" />
+          <button class="btn primary" id="search-btn">搜索</button>
+          <label class="btn upload-btn">
+            手动上传<br />视频文件
+            <input type="file" id="upload-input" accept="video/*" hidden />
+          </label>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ================= 跟练学习页 (learning) ================= -->
+  <main id="view-learning" class="view">
+    <div class="learning-layout">
+      <section class="pane">
+        <div class="pane-title">教学视频的当前片段</div>
+        <video id="teach-video" class="video-frame" controls playsinline></video>
+        <button class="switch-btn left" id="prev-seg" aria-label="向左切换上一个片段">&#10094; 上一片段</button>
+      </section>
+
+      <section class="pane">
+        <div class="pane-title">摄像头捕捉的实时画面</div>
+        <video id="camera-video" class="video-frame mirrored" autoplay muted playsinline></video>
+        <button class="switch-btn right" id="next-seg" aria-label="向右切换下一个片段">下一片段 &#10095;</button>
+      </section>
+    </div>
+
+    <div class="carousel bottom" id="learn-carousel">
+      <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
+      <div class="carousel-track" id="learn-carousel-track">
+        <div class="carousel-slide placeholder"><span>暂无片段</span></div>
+      </div>
+      <button class="carousel-arrow right" aria-label="下一个">&#10095;</button>
+    </div>
+  </main>
+
+  <!-- ================= 纠错回放页 (error correct) ================= -->
+  <main id="view-correct" class="view">
+    <div class="correct-layout">
+      <aside class="clip-list">
+        <div class="clip-item" id="clip-1">教学视频片段 1</div>
+        <div class="clip-item" id="clip-2">教学视频片段 2</div>
+        <div class="clip-nav">
+          <button class="switch-btn left small" id="prev-clip">&#10094;</button>
+          <button class="switch-btn right small" id="next-clip">&#10095;</button>
+        </div>
+      </aside>
+
+      <section class="pane wide">
+        <div class="pane-title">摄像头捕捉的画面回放</div>
+        <video id="replay-video" class="video-frame" controls playsinline></video>
+      </section>
+    </div>
+
+    <div class="carousel bottom" id="correct-carousel">
+      <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
+      <div class="carousel-track" id="correct-carousel-track">
+        <div class="carousel-slide placeholder"><span>暂无片段</span></div>
+      </div>
+      <button class="carousel-arrow right" aria-label="下一个">&#10095;</button>
+    </div>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
