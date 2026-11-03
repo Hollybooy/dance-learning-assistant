@@ -33,6 +33,9 @@ python run.py
 > 国内网络安装依赖可加镜像：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`
 >
 > 实测（本机 CPU，640x480 输入）：单帧推理约 16ms，WebSocket 往返约 17ms。
+>
+> 上传的视频会自动用内置 ffmpeg（imageio-ffmpeg）转码为 **H.264 + AAC + faststart**：
+> 微信/手机拍摄的视频常见 HEVC 编码，Chrome 桌面版无法解码（表现为黑屏、进度条不动）。
 
 ## 页面说明（对应设计稿）
 
@@ -149,7 +152,7 @@ cloudflared tunnel --url http://127.0.0.1:8000
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/videos/upload` | 上传教学视频，自动切片并触发骨架分析 |
+| POST | `/api/videos/upload` | 上传教学视频，自动转码 H.264、切片并触发骨架分析 |
 | GET | `/api/videos` | 视频库列表 |
 | GET | `/api/videos/search?q=` | 按标题搜索 |
 | GET | `/api/videos/{id}` | 元数据 + 切片 + 骨架状态 |

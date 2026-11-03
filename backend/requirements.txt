@@ -4,3 +4,4 @@ python-multipart>=0.0.20
 opencv-python-headless>=4.10
 mediapipe>=0.10.14
 numpy>=1.26,<3
+imageio-ffmpeg>=0.5

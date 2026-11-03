@@ -20,7 +20,7 @@ from ..config import (
     TEACH_SAMPLE_FPS,
     VIDEO_SUFFIXES,
 )
-from ..services.media_tools import safe_id
+from ..services.media_tools import safe_id, transcode_to_h264
 from ..services.teach_pose import extract_teaching_pose, load_pose_frames
 from ..services.video_store import video_store
 
@@ -41,6 +41,7 @@ async def upload_video(file: UploadFile = File(...)):
         raise HTTPException(400, f"不支持的视频格式：{suffix or '未知'}")
 
     tmp_path = DATA_DIR / f"upload-{uuid.uuid4().hex}{suffix}"
+    transcoded_path = DATA_DIR / f"transcode-{uuid.uuid4().hex}.mp4"
 
     def _copy() -> int:
         size = 0
@@ -59,11 +60,22 @@ async def upload_video(file: UploadFile = File(...)):
         size = await asyncio.to_thread(_copy)
         if size == 0:
             raise HTTPException(400, "上传的文件为空")
-        meta = await asyncio.to_thread(video_store.create, tmp_path, original)
+
+        # 微信/手机视频常见 HEVC，Chrome 无法解码（黑屏）；统一转成 H.264
+        store_source = tmp_path
+        try:
+            await asyncio.to_thread(transcode_to_h264, tmp_path, transcoded_path)
+            store_source = transcoded_path
+        except Exception:  # noqa: BLE001
+            logger.warning("上传视频转码失败，使用原始文件入库", exc_info=True)
+
+        meta = await asyncio.to_thread(video_store.create, store_source, original)
+        video_store.update(meta["id"], transcoded=store_source is transcoded_path)
     except ValueError as exc:
         raise HTTPException(413, str(exc)) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
+        transcoded_path.unlink(missing_ok=True)
 
     # 上传后立即在后台提取教学视频骨架
     _start_analysis(meta["id"])
