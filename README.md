@@ -26,6 +26,10 @@ python run.py
 
 浏览器打开 <http://127.0.0.1:8000>（前后端同源，摄像头要求 localhost 或 HTTPS）。
 
+> **Windows 一键启动**：双击项目根目录的 `start.bat`，会自动启动后端并打开浏览器。
+> 电脑重启后服务不会自动启动，重新双击即可；如需开机自启，把 `start.bat` 的快捷方式
+> 放到 `shell:startup` 目录（Win+R 输入 `shell:startup`）。
+
 > Python 版本：建议 3.10～3.13。MediaPipe ≥ 0.10.20 / 1.x 已移除 legacy `solutions`，
 > 后端会自动切换到 Tasks API，并在首次使用时下载 `pose_landmarker_lite.task`（约 5.5MB）到
 > `backend/models/`。若下载缓慢，可手动下载后放入该目录。
