@@ -32,6 +32,7 @@ class SessionRecorder:
         segment_start: Optional[float] = None,
         segment_end: Optional[float] = None,
         teach_start: Optional[float] = None,
+        teach_rate: Optional[float] = None,
     ) -> None:
         self.id = uuid.uuid4().hex[:12]
         self.dir = SESSION_DIR / self.id
@@ -45,6 +46,8 @@ class SessionRecorder:
         self.segment_end = segment_end
         # 录制开始瞬间教学视频的播放位置，回放时按真实时间对齐教学轮廓
         self.teach_start = teach_start
+        # 录制时的教学视频播放速度，回放映射时按同速推进
+        self.teach_rate = teach_rate
 
         self.created_at = _now_iso()
         self.frame_count = 0
@@ -97,6 +100,7 @@ class SessionRecorder:
             "segment_start": self.segment_start,
             "segment_end": self.segment_end,
             "teach_start": self.teach_start,
+            "teach_rate": self.teach_rate,
             "created_at": self.created_at,
             "duration": round(self.duration, 3),
             "frame_count": self.frame_count,

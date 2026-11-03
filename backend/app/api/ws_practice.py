@@ -124,6 +124,7 @@ async def practice_socket(ws: WebSocket) -> None:
                 )
 
                 teach_time = command.get("teach_time")
+                teach_rate = command.get("teach_rate")
                 recorder = SessionRecorder(
                     title=title,
                     video_id=video_id,
@@ -132,6 +133,7 @@ async def practice_socket(ws: WebSocket) -> None:
                     segment_start=segment["start"] if segment else None,
                     segment_end=segment["end"] if segment else None,
                     teach_start=float(teach_time) if isinstance(teach_time, (int, float)) else None,
+                    teach_rate=float(teach_rate) if isinstance(teach_rate, (int, float)) and teach_rate > 0 else None,
                 )
                 await send_json(
                     {"type": "record_started", "session_id": recorder.id, "title": title}

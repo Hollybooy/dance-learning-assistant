@@ -81,6 +81,14 @@
         </div>
         <div class="seg-controls">
           <button class="switch-btn left" id="prev-seg" aria-label="向左切换上一个片段">&#10094; 上一片段</button>
+          <label class="speed-box">倍速
+            <select class="mini-select" id="speed-select" title="教学视频播放速度">
+              <option value="0.2">0.2x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="2">2.0x</option>
+            </select>
+          </label>
           <span class="seg-indicator" id="seg-indicator">-- / --</span>
           <button class="switch-btn right" id="next-seg" aria-label="向右切换下一个片段">下一片段 &#10095;</button>
         </div>
@@ -91,12 +99,23 @@
           <div class="pane-title">摄像头捕捉的实时画面</div>
           <div class="pane-tools">
             <span class="badge" id="latency-badge">未开启</span>
+            <label class="speed-box">倒计时
+              <select class="mini-select" id="countdown-select" title="开始录制前的准备倒计时">
+                <option value="0">不等待</option>
+                <option value="3" selected>3 秒</option>
+                <option value="5">5 秒</option>
+                <option value="10">10 秒</option>
+              </select>
+            </label>
             <button class="btn record small" id="record-btn">● 开始录制</button>
           </div>
         </div>
         <div class="video-wrap">
           <video id="camera-video" class="video-frame mirrored" autoplay muted playsinline></video>
           <canvas id="camera-overlay" class="overlay-canvas mirrored"></canvas>
+          <div class="countdown-overlay" id="countdown-overlay" hidden>
+            <span id="countdown-num">3</span>
+          </div>
           <div class="cam-error" id="cam-error" hidden>
             <div class="cam-error-title" id="cam-error-title">摄像头不可用</div>
             <div class="cam-error-hint" id="cam-error-hint"></div>

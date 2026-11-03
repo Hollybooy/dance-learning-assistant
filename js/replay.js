@@ -106,9 +106,10 @@ export class ReplayPlayer {
     const s = this.session;
     const lastT = this.teachFrames.at(-1)?.t ?? 0;
 
-    // 优先按录制瞬间的真实播放位置 1:1 推进，帧率抖动也能对齐
+    // 优先按录制瞬间的真实播放位置推进；录制时若用了倍速，则按同速推进
     if (s && s.teach_start != null) {
-      const target = s.teach_start + t;
+      const rate = s.teach_rate > 0 ? s.teach_rate : 1;
+      const target = s.teach_start + t * rate;
       const limit = s.segment_end ?? lastT;
       return Math.min(target, limit);
     }

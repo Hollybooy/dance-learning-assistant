@@ -16,6 +16,7 @@ const state = {
   teachCache: new Map(),
   livePose: null,
   compare: true,
+  speed: 1,
   recording: false,
   currentSessionId: null,
 };
@@ -298,6 +299,7 @@ async function playSegment(index) {
   state.current = index;
   highlightSlides();
   updateSegIndicator();
+  teachVideo.playbackRate = state.speed || 1;
 
   if (!teachVideo.src && state.video) {
     teachVideo.src = api.streamUrl(state.video.id);
@@ -488,7 +490,9 @@ $('compare-toggle').addEventListener('change', (event) => {
   state.compare = event.target.checked;
 });
 
-$('record-btn').addEventListener('click', () => {
+let countdownActive = false;
+
+$('record-btn').addEventListener('click', async () => {
   if (!state.video) {
     alert('请先在「视频选择」页上传或选择一个教学视频');
     return;
@@ -498,16 +502,44 @@ $('record-btn').addEventListener('click', () => {
     ensureLive();
     return;
   }
-  if (!state.recording) {
-    live.sendRecordStart({
-      video_id: state.video.id,
-      segment_index: state.current,
-      teach_time: Number(teachVideo.currentTime.toFixed(3)),
-      title: `${state.video.title} · 片段 ${state.current + 1}`,
-    });
-  } else {
+  if (state.recording) {
     live.sendRecordStop();
+    return;
   }
+  if (countdownActive) return;
+
+  // 开始前倒计时，给用户回到位置的准备时间
+  const seconds = Number($('countdown-select').value) || 0;
+  if (seconds > 0) {
+    countdownActive = true;
+    const overlay = $('countdown-overlay');
+    const num = $('countdown-num');
+    const button = $('record-btn');
+    for (let left = seconds; left > 0 && live.running; left -= 1) {
+      overlay.hidden = false;
+      num.textContent = String(left);
+      button.textContent = `${left}s 后开始`;
+      await sleep(1000);
+    }
+    overlay.hidden = true;
+    button.textContent = '● 开始录制';
+    countdownActive = false;
+    if (!live.running || state.recording) return;
+  }
+
+  live.sendRecordStart({
+    video_id: state.video.id,
+    segment_index: state.current,
+    teach_time: Number(teachVideo.currentTime.toFixed(3)),
+    teach_rate: Number(teachVideo.playbackRate.toFixed(3)),
+    title: `${state.video.title} · 片段 ${state.current + 1}`,
+  });
+});
+
+// 教学视频播放速度
+$('speed-select').addEventListener('change', (event) => {
+  state.speed = Number(event.target.value) || 1;
+  teachVideo.playbackRate = state.speed;
 });
 
 /* ------------------------------------------------------ 骨架叠加绘制循环 */
