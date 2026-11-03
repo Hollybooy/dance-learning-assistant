@@ -241,7 +241,10 @@ function renderCarousels() {
 
 function highlightSlides() {
   document.querySelectorAll('.carousel-slide').forEach((slide) => {
-    slide.classList.toggle('active', Number(slide.dataset.index) === state.current);
+    const active = Number(slide.dataset.index) === state.current;
+    slide.classList.toggle('active', active);
+    // 长视频片段多：当前片段自动滚入可视区（只在水平方向滚动）
+    if (active) slide.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
   });
 }
 
@@ -729,8 +732,10 @@ document.querySelectorAll('.carousel').forEach((carousel) => {
   const track = carousel.querySelector('.carousel-track');
   carousel.querySelectorAll('.carousel-arrow').forEach((button) => {
     button.addEventListener('click', () => {
+      // 按可见宽度整页翻动，长视频的几十个片段也能像轮播一样收纳
+      const step = Math.max(track.clientWidth * 0.85, 260);
       track.scrollBy({
-        left: button.classList.contains('left') ? -260 : 260,
+        left: button.classList.contains('left') ? -step : step,
         behavior: 'smooth',
       });
     });

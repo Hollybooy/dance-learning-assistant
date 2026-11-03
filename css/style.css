@@ -147,13 +147,26 @@ body {
   color: var(--text-dim);
   cursor: pointer;
   transition: all .15s;
+  overflow: hidden; /* 长标题不得撑破卡片 */
+  flex-shrink: 0;
 }
 .chat-item:hover, .chat-item.active { background: #2e3946; color: var(--text); }
-.chat-title { font-size: 13px; color: var(--text); line-height: 1.4; }
+.chat-title {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-all;         /* 无空格长串（哈希名等）强制换行 */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;         /* 最多两行，超出省略 */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .chat-time { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 
 .selecting-main {
   flex: 1;
+  min-width: 0; /* 允许收缩，防止长片段列表把整页撑宽 */
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -163,14 +176,16 @@ body {
 }
 
 /* ---------- 轮播图 ---------- */
-.carousel { display: flex; align-items: center; gap: 10px; }
+.carousel { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .carousel-track {
   flex: 1;
+  min-width: 0; /* 关键：让轨道在容器内滚动，而不是撑破页面 */
   display: flex;
   gap: 12px;
   overflow-x: auto;
   padding: 6px 2px;
   scroll-behavior: smooth;
+  scrollbar-width: thin;
 }
 .carousel-track::-webkit-scrollbar { height: 6px; }
 .carousel-track::-webkit-scrollbar-thumb { background: #33404e; border-radius: 3px; }
