@@ -269,7 +269,34 @@ function updateSegProgress() {
   const ratio = span > 0 ? (t - segment.start) / span : 0;
   fill.style.width = `${Math.min(100, Math.max(0, ratio * 100))}%`;
   label.textContent = `${formatTime(t - segment.start)} / ${formatTime(span)}`;
+  updateTeachPlayButton();
 }
+
+/* ---- 暂停 / 继续：播完后点"继续"则从头重看本片段 ---- */
+
+function updateTeachPlayButton() {
+  const segment = state.segments[state.current];
+  const atEnd = !!segment && teachVideo.currentTime >= segment.end - 0.02;
+  $('teach-play-toggle').textContent =
+    !teachVideo.paused && !atEnd ? '⏸ 暂停' : '▶ 继续';
+}
+
+$('teach-play-toggle').addEventListener('click', () => {
+  const segment = state.segments[state.current];
+  if (!segment) return;
+  if (teachVideo.paused) {
+    if (teachVideo.currentTime >= segment.end - 0.02) {
+      teachVideo.currentTime = segment.start;
+      updateSegProgress();
+    }
+    teachVideo.play().catch(() => {});
+  } else {
+    teachVideo.pause();
+  }
+});
+['play', 'pause'].forEach((type) => {
+  teachVideo.addEventListener(type, updateTeachPlayButton);
+});
 
 let scrubbing = false;
 
