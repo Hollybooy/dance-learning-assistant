@@ -323,6 +323,8 @@ teachVideo.addEventListener('timeupdate', () => {
     teachVideo.pause();
     teachVideo.currentTime = Math.min(segment.end, teachVideo.duration || segment.end);
     updateSegProgress();
+    // 片段播完自动结束录制
+    if (state.recording) live.sendRecordStop();
   }
 });
 
@@ -527,13 +529,21 @@ $('record-btn').addEventListener('click', async () => {
     if (!live.running || state.recording) return;
   }
 
+  // 录制从当前片段开头同步播放，片段播完自动停止录制
+  const segment = state.segments[state.current];
+  const startAt = segment ? segment.start : teachVideo.currentTime;
   live.sendRecordStart({
     video_id: state.video.id,
     segment_index: state.current,
-    teach_time: Number(teachVideo.currentTime.toFixed(3)),
+    teach_time: Number(startAt.toFixed(3)),
     teach_rate: Number(teachVideo.playbackRate.toFixed(3)),
     title: `${state.video.title} · 片段 ${state.current + 1}`,
   });
+  if (segment) {
+    teachVideo.currentTime = segment.start;
+    updateSegProgress();
+    teachVideo.play().catch(() => {});
+  }
 });
 
 // 教学视频播放速度
