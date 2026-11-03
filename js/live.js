@@ -41,32 +41,11 @@ export class LivePoseStream {
     this.onStatus?.('正在请求摄像头…');
 
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: CAPTURE_WIDTH },
-          height: { ideal: CAPTURE_HEIGHT },
-          frameRate: { ideal: 30, max: 30 },
-        },
-        audio: false,
-      });
+      this.stream = await this._openWithFallback();
     } catch (error) {
-      // 分辨率/帧率约束不被支持时，降级为"任意摄像头"再试一次
-      if (error?.name === 'OverconstrainedError' || error?.name === 'NotFoundError') {
-        try {
-          this.stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: false,
-          });
-        } catch (fallbackError) {
-          this.running = false;
-          this.onStatus?.('摄像头不可用');
-          throw fallbackError;
-        }
-      } else {
-        this.running = false;
-        this.onStatus?.('摄像头不可用');
-        throw error;
-      }
+      this.running = false;
+      this.onStatus?.('摄像头不可用');
+      throw error;
     }
 
     this.video.srcObject = this.stream;
@@ -87,6 +66,65 @@ export class LivePoseStream {
     }
     this.video.srcObject = null;
     this.onStatus?.('已停止');
+  }
+
+  /** 带兜底的摄像头打开：默认设备失败时，逐个尝试其余摄像头。 */
+  async _openWithFallback() {
+    try {
+      return await this._openStream();
+    } catch (error) {
+      // 只有"设备本身打不开"类错误才值得换设备重试；权限拒绝直接抛出
+      const retryable = ['NotReadableError', 'TrackStartError', 'AbortError', 'NotFoundError'];
+      if (!retryable.includes(error?.name)) throw error;
+
+      let devices = [];
+      try {
+        devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+          (d) => d.kind === 'videoinput'
+        );
+      } catch {
+        /* 枚举失败则维持原错误 */
+      }
+      if (devices.length <= 1) throw error;
+
+      let lastError = error;
+      for (const device of devices) {
+        this.onStatus?.(`正在尝试摄像头：${device.label || '未命名设备'}`);
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: device.deviceId },
+              width: { ideal: CAPTURE_WIDTH },
+              height: { ideal: CAPTURE_HEIGHT },
+              frameRate: { ideal: 30, max: 30 },
+            },
+            audio: false,
+          });
+        } catch (deviceError) {
+          lastError = deviceError;
+        }
+      }
+      throw lastError;
+    }
+  }
+
+  async _openStream() {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: CAPTURE_WIDTH },
+          height: { ideal: CAPTURE_HEIGHT },
+          frameRate: { ideal: 30, max: 30 },
+        },
+        audio: false,
+      });
+    } catch (error) {
+      // 分辨率/帧率约束不被支持时，降级为"任意摄像头"再试一次
+      if (error?.name === 'OverconstrainedError') {
+        return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      throw error;
+    }
   }
 
   _connect() {
