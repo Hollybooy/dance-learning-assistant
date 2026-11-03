@@ -11,6 +11,7 @@ backend/data/
 # 姿态模型缓存与安装日志
 backend/models/
 backend/*.log
+backend/*.err
 backend/tmpdl/
 
 # 系统文件
