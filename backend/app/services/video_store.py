@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..config import SEGMENT_SECONDS, VIDEO_DIR
-from .media_tools import build_segments, probe_duration, title_from_filename
+from .media_tools import build_segments, extract_segment_thumbs, probe_duration, title_from_filename
 
 
 def _now_iso() -> str:
@@ -62,6 +62,16 @@ class VideoStore:
         os.replace(upload_path, folder / final_name)
 
         duration = probe_duration(folder / final_name)
+        segments = build_segments(duration, SEGMENT_SECONDS)
+
+        # 为每个片段截取封面缩略图（失败不影响入库）
+        try:
+            extract_segment_thumbs(folder / final_name, segments, folder / "thumbs")
+            for segment in segments:
+                segment["thumbnail"] = f"/media/videos/{video_id}/thumbs/seg_{int(segment['index']):02d}.jpg"
+        except Exception:  # noqa: BLE001
+            pass
+
         meta: Dict[str, Any] = {
             "id": video_id,
             "title": title_from_filename(original_name),
@@ -70,7 +80,7 @@ class VideoStore:
             "duration": duration,
             "created_at": _now_iso(),
             "segment_seconds": SEGMENT_SECONDS,
-            "segments": build_segments(duration, SEGMENT_SECONDS),
+            "segments": segments,
             "pose_status": "pending",
             "pose_progress": 0.0,
             "pose_frames": 0,

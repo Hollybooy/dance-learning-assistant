@@ -54,6 +54,45 @@ def transcode_to_h264(src: Path, dst: Path) -> None:
         raise RuntimeError(f"视频转码失败：{result.stderr[-500:]}")
 
 
+def extract_segment_thumbs(src: Path, segments: List[Dict[str, Any]], thumbs_dir: Path) -> None:
+    """为每个片段在起始位置附近截取一帧，作为轮播封面缩略图。
+
+    单张失败只跳过该片段，不影响整体流程（前端回退为纯色卡片）。
+    """
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        duration = probe_duration(src)
+    except Exception:  # noqa: BLE001
+        duration = None
+
+    for segment in segments:
+        out = thumbs_dir / f"seg_{int(segment['index']):02d}.jpg"
+        at = float(segment["start"]) + 0.5
+        if duration:
+            at = min(at, max(duration - 0.1, 0.0))
+        cmd = [
+            ffmpeg_exe(),
+            "-y",
+            "-ss",
+            f"{at:.3f}",
+            "-i",
+            str(src),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "3",
+            "-vf",
+            "scale=480:-2",
+            str(out),
+        ]
+        try:
+            subprocess.run(cmd, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception:  # noqa: BLE001
+            continue
+        if not out.exists():
+            continue
+
+
 def probe_duration(path: Path) -> float:
     """读取视频时长（秒）。失败返回 0。"""
     cap = cv2.VideoCapture(str(path))

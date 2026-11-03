@@ -221,6 +221,7 @@ function renderCarousels() {
       slide.className = 'carousel-slide';
       slide.dataset.index = segment.index;
       slide.innerHTML = `
+        ${segment.thumbnail ? `<img class="slide-cover" src="${segment.thumbnail}" alt="" loading="lazy" />` : ''}
         <span class="seg-label">片段 ${segment.index + 1}</span>
         <span class="seg-time">${formatTime(segment.start)} – ${formatTime(segment.end)}</span>
         <span class="seg-duration">${Math.round(segment.duration)}s</span>
