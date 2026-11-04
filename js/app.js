@@ -43,7 +43,10 @@ function switchTab(name) {
   document.querySelectorAll('.view').forEach((view) => {
     view.classList.toggle('active', view.id === `view-${name}`);
   });
-  if (name === 'learning') ensureLive();
+  if (name === 'learning') {
+    ensureLive();
+    ensureTeachPoseLoaded();
+  }
   if (name === 'correct') refreshSessions(!state.currentSessionId);
 }
 
@@ -170,6 +173,50 @@ async function selectVideo(meta) {
     state.teachFrames = state.teachCache.get(meta.id);
   } else if (meta.pose_status === 'ready') {
     await loadTeachPose(meta.id);
+  } else if (meta.pose_status !== 'failed') {
+    // 分析中：后台等待完成，避免骨架对比一直不出现
+    watchPoseUntilReady(meta.id);
+  }
+}
+
+/** 骨架仍在分析时后台等待，完成后自动载入（切换视频则自动放弃） */
+async function watchPoseUntilReady(videoId) {
+  $('teach-badge').textContent = '骨架分析中…';
+  for (let i = 0; i < 1200; i += 1) {
+    await sleep(1500);
+    if (state.video?.id !== videoId) return;
+    let meta;
+    try {
+      meta = await api.getVideo(videoId);
+    } catch {
+      continue;
+    }
+    if (meta.pose_status === 'ready') {
+      state.video = meta;
+      await loadTeachPose(videoId);
+      return;
+    }
+    if (meta.pose_status === 'failed') {
+      $('teach-badge').textContent = '骨架分析失败';
+      return;
+    }
+    $('teach-badge').textContent = `骨架分析中 ${Math.round((meta.pose_progress || 0) * 100)}%`;
+  }
+}
+
+/** 切换到跟练页时补一次骨架载入（防止打开页面时还在分析） */
+async function ensureTeachPoseLoaded() {
+  if (!state.video || state.teachFrames.length) return;
+  try {
+    const meta = await api.getVideo(state.video.id);
+    state.video = meta;
+    if (meta.pose_status === 'ready') {
+      await loadTeachPose(meta.id);
+    } else if (meta.pose_status !== 'failed') {
+      watchPoseUntilReady(meta.id);
+    }
+  } catch {
+    /* 网络异常时忽略，下一次切换再试 */
   }
 }
 
