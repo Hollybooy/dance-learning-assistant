@@ -78,25 +78,32 @@ export function drawPose(ctx, pose, rect, options = {}) {
 
 /** 人体尺度：髋部中心与肩髋躯干长度（像素）。 */
 function metrics(pose, rect) {
-  const hipL = pose[23];
-  const hipR = pose[24];
+  const vis = (p) => p && (p[3] ?? 1) >= MIN_VISIBILITY;
+  const pt = (p) => ({ x: rect.x + p[0] * rect.w, y: rect.y + p[1] * rect.h });
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
   const shL = pose[11];
   const shR = pose[12];
-  if (!hipL || !hipR || !shL || !shR) return null;
-  if ((hipL[3] ?? 1) < MIN_VISIBILITY || (shL[3] ?? 1) < MIN_VISIBILITY) return null;
+  const hipL = pose[23];
+  const hipR = pose[24];
 
-  const hip = {
-    x: rect.x + ((hipL[0] + hipR[0]) / 2) * rect.w,
-    y: rect.y + ((hipL[1] + hipR[1]) / 2) * rect.h,
-  };
-  const shoulder = {
-    x: rect.x + ((shL[0] + shR[0]) / 2) * rect.w,
-    y: rect.y + ((shL[1] + shR[1]) / 2) * rect.h,
-  };
-  return {
-    hip,
-    torso: Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y) || 1,
-  };
+  if (vis(shL) && vis(shR) && vis(hipL) && vis(hipR)) {
+    const hip = mid(pt(hipL), pt(hipR));
+    const shoulder = mid(pt(shL), pt(shR));
+    return { hip, shoulder, torso: Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y) || 1 };
+  }
+
+  // 半身入镜（坐姿/镜头近）时髋部常不可见：降级用肩宽估算躯干长度，
+  // 肩部中心作为锚点，保证对比轮廓不因取景而整体消失
+  if (vis(shL) && vis(shR)) {
+    const a = pt(shL);
+    const b = pt(shR);
+    const shoulder = mid(a, b);
+    const torso = Math.hypot(a.x - b.x, a.y - b.y) * 1.4 || 1;
+    return { hip: { x: shoulder.x, y: shoulder.y + torso }, shoulder, torso };
+  }
+
+  return null;
 }
 
 /**
