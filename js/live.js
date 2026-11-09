@@ -12,6 +12,9 @@ const CAPTURE_HEIGHT = 480;
 const JPEG_QUALITY = 0.6;
 const ACK_TIMEOUT_MS = 600;
 const RECONNECT_DELAY_MS = 800;
+// 允许同时在途的帧数：1 帧太保守（吞吐被单次往返卡死），
+// 2 帧可以把采集/录制帧率提到 ~20-30fps，同时端到端延时仍只有一帧左右
+const MAX_IN_FLIGHT = 2;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -27,7 +30,9 @@ export class LivePoseStream {
     this.running = false;
     this.recording = false;
     this.sentAt = 0;
-    this._ack = null;
+    this._inFlight = 0;
+    this._slotWaiters = [];
+    this._lastSendAt = 0;
     this._canvas = document.createElement('canvas');
     this._canvas.width = CAPTURE_WIDTH;
     this._canvas.height = CAPTURE_HEIGHT;
@@ -38,6 +43,7 @@ export class LivePoseStream {
   async start() {
     if (this.running) return;
     this.running = true;
+    this._resetSlots();
     this.onStatus?.('正在请求摄像头…');
 
     try {
@@ -59,6 +65,7 @@ export class LivePoseStream {
 
   stop() {
     this.running = false;
+    this._resetSlots();
     this._closeSocket();
     if (this.stream) {
       this.stream.getTracks().forEach((track) => track.stop());
@@ -181,8 +188,7 @@ export class LivePoseStream {
         rtt,
         dropped: message.dropped ?? 0,
       });
-      this._ack?.();
-      this._ack = null;
+      this._releaseSlot();
     } else if (message.type === 'ready') {
       this.onStatus?.(`实时骨架已连接 · 录制 ${message.record_fps}fps`);
     } else if (message.type === 'record_started') {
@@ -196,6 +202,32 @@ export class LivePoseStream {
     }
   }
 
+  /** 占用一个在途名额；满员时等待回包释放 */
+  _acquireSlot() {
+    if (this._inFlight < MAX_IN_FLIGHT) {
+      this._inFlight += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this._slotWaiters.push(resolve);
+    }).then(() => {
+      this._inFlight += 1;
+    });
+  }
+
+  _releaseSlot() {
+    this._inFlight = Math.max(0, this._inFlight - 1);
+    const waiters = this._slotWaiters.splice(0);
+    waiters.forEach((resolve) => resolve());
+  }
+
+  /** 长时间收不到回包（服务端卡住/网络抖动）时复位名额，避免链路停摆 */
+  _resetSlots() {
+    this._inFlight = 0;
+    const waiters = this._slotWaiters.splice(0);
+    waiters.forEach((resolve) => resolve());
+  }
+
   async _loop() {
     while (this._loopRunning) {
       if (!this.running || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -206,25 +238,33 @@ export class LivePoseStream {
         await sleep(60);
         continue;
       }
+      if (this._inFlight > 0 && performance.now() - this._lastSendAt > ACK_TIMEOUT_MS + 400) {
+        this._resetSlots();
+      }
+
+      await this._acquireSlot();
+      if (!this.running || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this._releaseSlot();
+        await sleep(60);
+        continue;
+      }
 
       const blob = await this._grab();
       if (!blob) {
+        this._releaseSlot();
         await sleep(20);
         continue;
       }
 
-      const ack = new Promise((resolve) => {
-        this._ack = resolve;
-      });
       this.sentAt = performance.now();
+      this._lastSendAt = this.sentAt;
       try {
         this.ws.send(blob);
       } catch {
-        this._ack = null;
+        this._releaseSlot();
         await sleep(100);
         continue;
       }
-      await Promise.race([ack, sleep(ACK_TIMEOUT_MS)]);
     }
   }
 

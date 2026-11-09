@@ -41,7 +41,13 @@ async def practice_socket(ws: WebSocket) -> None:
     await ws.accept()
 
     send_lock = asyncio.Lock()
-    state: Dict[str, Any] = {"busy": False, "dropped": 0, "closed": False}
+    state: Dict[str, Any] = {
+        "busy": False,
+        "dropped": 0,
+        "closed": False,
+        # 最近一次稳定后的骨架：录制与推理解耦后，录制帧就用它当骨架
+        "latest_pose": None,
+    }
     recorder: Optional[SessionRecorder] = None
     stabilizer = PoseStabilizer()
 
@@ -62,6 +68,7 @@ async def practice_socket(ws: WebSocket) -> None:
             pose = await live_pose_engine.estimate_jpeg(data)
             # 漂移帧剔除 + 自适应平滑 + 丢帧补齐（实时显示与录制共用同一结果）
             pose = stabilizer.filter(pose)
+            state["latest_pose"] = pose
             server_ms = (time.perf_counter() - started) * 1000.0
             await send_json(
                 {
@@ -73,8 +80,6 @@ async def practice_socket(ws: WebSocket) -> None:
                 }
             )
             state["dropped"] = 0
-            if recorder is not None:
-                recorder.submit(data, pose)
         except (WebSocketDisconnect, RuntimeError):
             state["closed"] = True
         except Exception:  # noqa: BLE001
@@ -92,6 +97,10 @@ async def practice_socket(ws: WebSocket) -> None:
 
             data = message.get("bytes")
             if data is not None:
+                # 录制与推理解耦：推理忙时也按帧率存帧，骨架沿用最近一次稳定结果，
+                # 这样录制帧率不再被推理吞吐卡住（回放更流畅）
+                if recorder is not None:
+                    recorder.submit(data, state["latest_pose"])
                 asyncio.create_task(process_frame(data))
                 continue
 

@@ -17,8 +17,8 @@ SEGMENT_SECONDS = float(os.getenv("DANCEMATE_SEGMENT_SECONDS", "10"))
 # 教学视频骨架采样帧率：15fps 足够逐帧对比，且离线分析速度可接受
 TEACH_SAMPLE_FPS = float(os.getenv("DANCEMATE_TEACH_FPS", "15"))
 
-# 录制回放采样帧率：12fps 保证回放流畅且磁盘占用可控
-RECORD_FPS = float(os.getenv("DANCEMATE_RECORD_FPS", "12"))
+# 录制回放采样帧率：24fps 保证回放流畅；磁盘约 1MB/s，可接受
+RECORD_FPS = float(os.getenv("DANCEMATE_RECORD_FPS", "24"))
 
 # MediaPipe 模型复杂度：0 = Lite，实时链路优先低延时
 POSE_MODEL_COMPLEXITY = int(os.getenv("DANCEMATE_POSE_COMPLEXITY", "0"))

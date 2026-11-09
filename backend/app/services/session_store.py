@@ -55,7 +55,9 @@ class SessionRecorder:
         self.duration = 0.0
 
         self._start = time.time()
-        self._last_submit = 0.0
+        # 帧率采样用累积配额（见 submit），避免输入帧率与目标帧率不成整数倍时丢一半帧
+        self._last_tick = self._start
+        self._budget = 1.0
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=120)
         self._closed = False
         self._writer = asyncio.create_task(self._run_writer())
@@ -66,9 +68,14 @@ class SessionRecorder:
         if self._closed:
             return
         now = time.time()
-        if now - self._last_submit < 1.0 / max(RECORD_FPS, 1.0):
+        # 按"时间 × 目标帧率"累积配额决定存不存这一帧：
+        # 30fps 输入、24fps 目标时能稳定得到 24fps；
+        # 而"上次时间 + 固定间隔"的硬节流会把每两帧丢一帧，只剩 15fps。
+        self._budget += (now - self._last_tick) * max(RECORD_FPS, 1.0)
+        self._last_tick = now
+        if self._budget < 1.0:
             return
-        self._last_submit = now
+        self._budget = min(self._budget - 1.0, 1.0)  # 停顿后不爆发补存
         try:
             self._queue.put_nowait((jpeg, pose, now - self._start))
         except asyncio.QueueFull:

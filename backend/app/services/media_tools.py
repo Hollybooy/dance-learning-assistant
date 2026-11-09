@@ -18,23 +18,39 @@ def ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def transcode_to_h264(src: Path, dst: Path) -> None:
-    """转码为浏览器兼容的 H.264 + AAC（微信等来源常见 HEVC，Chrome 无法解码）。
+_NVENC_AVAILABLE: "bool | None" = None
 
-    * yuv420p：保证所有显卡/浏览器都能渲染
-    * +faststart：moov 前置，边下边播、拖动进度条秒响应
-    """
-    cmd = [
+
+def has_nvenc() -> bool:
+    """探测当前 ffmpeg 是否带 NVIDIA 硬件编码器（结果缓存，只探一次）。"""
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is not None:
+        return _NVENC_AVAILABLE
+    try:
+        out = subprocess.run(
+            [ffmpeg_exe(), "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        _NVENC_AVAILABLE = "h264_nvenc" in (out.stdout or "")
+    except Exception:  # noqa: BLE001
+        _NVENC_AVAILABLE = False
+    return _NVENC_AVAILABLE
+
+
+def _transcode_cmd(src: Path, dst: Path, use_gpu: bool) -> List[str]:
+    if use_gpu:
+        codec = ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
+    else:
+        codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22"]
+    return [
         ffmpeg_exe(),
         "-y",
         "-i",
         str(src),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "22",
+        *codec,
         "-pix_fmt",
         "yuv420p",
         "-vf",
@@ -47,11 +63,27 @@ def transcode_to_h264(src: Path, dst: Path) -> None:
         "+faststart",
         str(dst),
     ]
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"视频转码失败：{result.stderr[-500:]}")
+
+
+def transcode_to_h264(src: Path, dst: Path) -> None:
+    """转码为浏览器兼容的 H.264 + AAC（微信等来源常见 HEVC，Chrome 无法解码）。
+
+    * 有 NVIDIA 显卡时用 h264_nvenc 硬件编码，否则回退 libx264 软编码
+    * yuv420p：保证所有显卡/浏览器都能渲染
+    * +faststart：moov 前置，边下边播、拖动进度条秒响应
+    """
+    errors: List[str] = []
+    for use_gpu in ([True, False] if has_nvenc() else [False]):
+        result = subprocess.run(
+            _transcode_cmd(src, dst, use_gpu),
+            capture_output=True,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode == 0 and dst.exists() and dst.stat().st_size > 0:
+            return
+        errors.append(("nvenc" if use_gpu else "libx264") + ": " + (result.stderr or "")[-400:])
+    raise RuntimeError("视频转码失败：" + " | ".join(errors))
 
 
 def extract_segment_thumbs(src: Path, segments: List[Dict[str, Any]], thumbs_dir: Path) -> None:
