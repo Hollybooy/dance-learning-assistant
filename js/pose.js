@@ -131,6 +131,15 @@ export function mapPose(sourcePose, sourceRect, targetPose, targetRect) {
   });
 }
 
+/** 水平翻转骨架（x → 1-x）。
+ * 教学视频是正向视角、摄像头是镜像显示：跨视角映射骨架时必须先翻转，
+ * 否则映射出的轮廓左右相反（镜像感）。
+ */
+export function flipX(pose) {
+  if (!pose) return pose;
+  return pose.map((p) => (p ? [1 - p[0], p[1], p[2], p[3]] : p));
+}
+
 /** 在按时间排序的骨架帧中取最接近 t 的一帧。 */
 export function poseAt(frames, t) {
   if (!frames || !frames.length) return null;

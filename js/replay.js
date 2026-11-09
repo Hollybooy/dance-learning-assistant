@@ -5,7 +5,7 @@
  * 按人体尺度映射到回放人物身上，形成"教学 vs 实际"的叠加对比。
  */
 
-import { drawPose, mapPose, poseAt } from './pose.js';
+import { drawPose, mapPose, poseAt, flipX } from './pose.js';
 
 const PRELOAD_AHEAD = 36;
 
@@ -146,7 +146,8 @@ export class ReplayPlayer {
     if (this.showTeach && entry.pose && this.teachFrames.length) {
       const teachFrame = poseAt(this.teachFrames, this._teachTime(entry.t));
       if (teachFrame?.pose) {
-        const mapped = mapPose(teachFrame.pose, rect, entry.pose, rect);
+        // 教学骨架先翻转到镜像视角，再映射到录制画面上，左右方向与实际动作一致
+        const mapped = mapPose(flipX(teachFrame.pose), rect, entry.pose, rect);
         if (mapped) {
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',

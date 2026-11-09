@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
@@ -141,3 +143,95 @@ class PoseEngine:
 
 # 实时链路共享引擎：所有 WebSocket 会话串行使用，保证 CPU 不被多路抢占
 live_pose_engine = PoseEngine(model_complexity=POSE_MODEL_COMPLEXITY, name="pose-live")
+
+
+class PoseStabilizer:
+    """实时骨架稳定器：异常漂移帧剔除 + 自适应平滑 + 丢帧补齐。
+
+    - 漂移检测：用可见关节位移的**中位数**衡量整帧跳变（对个别点噪声不敏感），
+      超过阈值判定为漂移帧，连续少量漂移帧直接沿用上一帧（等于补帧）；
+      连续多帧大跳变则接受——那是真实的快速移动或重新入镜，不能永久冻结。
+    - 逐点钳制：整帧平稳但个别关节瞬间飞出（典型误识别），单独钳回上一帧位置。
+    - 自适应平滑：位移越大 alpha 越高（跟手），位移越小越平滑（去抖动）。
+    - 丢帧补齐：短暂检测不到人（丢帧/遮挡）时沿用上一骨架，超过时限才置空。
+    """
+
+    JUMP_THRESHOLD = 0.14   # 整帧跳变阈值（归一化坐标）
+    PER_JOINT_LIMIT = 0.45  # 单关节最大跳变（超过则钳制，写实快速摆臂也难超过）
+    MAX_HOLD_DRIFT = 2      # 连续漂移帧沿用上一帧的上限
+    HOLD_SECONDS = 0.5      # 丢帧补齐的最长时长
+    ALPHA_MIN = 0.35        # 静止时的平滑系数（越小越稳）
+    ALPHA_MAX = 0.85        # 快速动作时的平滑系数（越大越跟手）
+    # 核心关节：头/肩/肘/腕/髋/膝/踝——漂移检测只看这些，
+    # 避免大量低可见度或静止点稀释中位数信号
+    CORE_JOINTS = (0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+
+    def __init__(self) -> None:
+        self._prev: Optional[List[List[float]]] = None
+        self._hold_until = 0.0
+        self._drift_streak = 0
+
+    @classmethod
+    def _median_jump(cls, pose: List[List[float]], prev: List[List[float]]) -> float:
+        dists: List[float] = []
+        for i in cls.CORE_JOINTS:
+            if i >= len(pose) or i >= len(prev):
+                continue
+            cur, old = pose[i], prev[i]
+            if not cur or not old or len(cur) < 4 or len(old) < 4:
+                continue
+            if cur[3] < 0.3 or old[3] < 0.3:
+                continue
+            dists.append(math.hypot(cur[0] - old[0], cur[1] - old[1]))
+        if not dists:
+            return 0.0
+        dists.sort()
+        return dists[len(dists) // 2]
+
+    def filter(self, pose: Optional[List[List[float]]]) -> Optional[List[List[float]]]:
+        now = time.perf_counter()
+
+        # 没检测到人：短时间内补帧（沿用上一骨架），超时才承认丢失
+        if not pose:
+            if self._prev is not None and now < self._hold_until:
+                return self._prev
+            return None
+
+        if self._prev is None:
+            self._prev = [list(p) if p else None for p in pose]  # type: ignore[arg-type]
+            self._hold_until = now + self.HOLD_SECONDS
+            return self._prev
+
+        jump = self._median_jump(pose, self._prev)
+        if jump > self.JUMP_THRESHOLD and self._drift_streak < self.MAX_HOLD_DRIFT:
+            # 异常漂移帧：剔除，沿用上一帧
+            self._drift_streak += 1
+            return self._prev
+        self._drift_streak = 0
+
+        # 自适应平滑：动得越快越跟手，动得越慢越稳
+        alpha = min(self.ALPHA_MAX, self.ALPHA_MIN + jump * 6.0)
+        out: List[List[float]] = []
+        for cur, old in zip(pose, self._prev):
+            if not cur:
+                out.append(old)
+                continue
+            if not old or len(old) < 4 or len(cur) < 4:
+                out.append(list(cur))
+                continue
+            d = math.hypot(cur[0] - old[0], cur[1] - old[1])
+            if d > self.PER_JOINT_LIMIT and jump <= self.JUMP_THRESHOLD:
+                # 个别关节瞬间飞出（误识别）：钳回上一帧位置，可见度取当前值
+                out.append([old[0], old[1], old[2], cur[3]])
+                continue
+            out.append(
+                [
+                    round(old[0] + (cur[0] - old[0]) * alpha, 4),
+                    round(old[1] + (cur[1] - old[1]) * alpha, 4),
+                    round(old[2] + (cur[2] - old[2]) * alpha, 4),
+                    cur[3],
+                ]
+            )
+        self._prev = out
+        self._hold_until = now + self.HOLD_SECONDS
+        return out

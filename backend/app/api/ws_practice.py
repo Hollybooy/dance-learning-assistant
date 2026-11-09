@@ -28,7 +28,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..config import RECORD_FPS
-from ..services.pose_engine import live_pose_engine
+from ..services.pose_engine import PoseStabilizer, live_pose_engine
 from ..services.session_store import SessionRecorder
 from ..services.video_store import video_store
 
@@ -43,6 +43,7 @@ async def practice_socket(ws: WebSocket) -> None:
     send_lock = asyncio.Lock()
     state: Dict[str, Any] = {"busy": False, "dropped": 0, "closed": False}
     recorder: Optional[SessionRecorder] = None
+    stabilizer = PoseStabilizer()
 
     async def send_json(payload: Dict[str, Any]) -> None:
         async with send_lock:
@@ -59,6 +60,8 @@ async def practice_socket(ws: WebSocket) -> None:
         try:
             started = time.perf_counter()
             pose = await live_pose_engine.estimate_jpeg(data)
+            # 漂移帧剔除 + 自适应平滑 + 丢帧补齐（实时显示与录制共用同一结果）
+            pose = stabilizer.filter(pose)
             server_ms = (time.perf_counter() - started) * 1000.0
             await send_json(
                 {

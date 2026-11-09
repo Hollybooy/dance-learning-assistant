@@ -1,7 +1,7 @@
 /** 页面主逻辑：视频库、切片轮播、实时骨架对比、练习回放。 */
 
 import { api } from './api.js';
-import { fitRect, drawPose, mapPose, poseAt } from './pose.js';
+import { fitRect, drawPose, mapPose, poseAt, flipX } from './pose.js';
 import { LivePoseStream } from './live.js';
 import { ReplayPlayer } from './replay.js';
 
@@ -645,7 +645,8 @@ function drawTeachOverlay() {
 
     if (state.compare && state.livePose && cameraVideo.videoWidth) {
       const liveRect = { x: 0, y: 0, w: cameraVideo.videoWidth, h: cameraVideo.videoHeight };
-      const mapped = mapPose(state.livePose, liveRect, frame.pose, rect);
+      // 摄像头为镜像显示：把你的骨架先翻转到正向视角，再映射到教学画面
+      const mapped = mapPose(flipX(state.livePose), liveRect, frame.pose, rect);
       if (mapped) {
         drawPose(ctx, mapped, rect, {
           color: '#00e5a0',
@@ -677,7 +678,8 @@ function drawCameraOverlay() {
           w: teachVideo.videoWidth,
           h: teachVideo.videoHeight,
         };
-        const mapped = mapPose(teaching.pose, teachRect, state.livePose, rect);
+        // 教学骨架先翻转到镜像视角，再映射到你身上，左右方向与所见一致
+        const mapped = mapPose(flipX(teaching.pose), teachRect, state.livePose, rect);
         if (mapped) {
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',
