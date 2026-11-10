@@ -7,11 +7,12 @@
 ┌──────────────┐    JPEG 640x480 q0.6    ┌─────────────────┐
 │  浏览器摄像头 │ ──────────────────────▶ │  FastAPI 后端    │
 │  Canvas 叠加  │ ◀────────────────────── │  MediaPipe Pose │
-└──────────────┘   33 个关键点 JSON       └─────────────────┘
+└──────────────┘  33 关键点 + 人物掩码     └─────────────────┘
         │                                        │
-        │ 录制：帧 + 每帧骨架                     │ 教学视频离线骨架
+        │ 录制：帧 + 骨架 + 掩码                  │ 教学视频离线骨架 + 掩码
         ▼                                        ▼
-   backend/data/sessions/<id>/             backend/data/videos/<id>/pose.json
+   backend/data/sessions/<id>/             backend/data/videos/<id>/
+   {frames/*.jpg, poses.json, masks.bin}   {pose.json, masks.bin}
 ```
 
 ## 快速开始
@@ -41,6 +42,34 @@ python run.py
 > 上传的视频会自动用内置 ffmpeg（imageio-ffmpeg）转码为 **H.264 + AAC + faststart**：
 > 微信/手机拍摄的视频常见 HEVC 编码，Chrome 桌面版无法解码（表现为黑屏、进度条不动）。
 
+## 分享给他人
+
+仓库地址（已公开）：<https://github.com/Hollybooy/dance-learning-assistant>
+
+| 需求 | 做法 |
+|------|------|
+| 给源码（最常见） | 直接发仓库链接；对方 `git clone`，或在页面点 **Code → Download ZIP** |
+| 邀请一起开发 | 仓库 **Settings → Collaborators → Add people**，对方接受邀请后获得写权限 |
+| 冻结一个可交付版本 | **Releases → Draft a new release** 打 tag，GitHub 自动生成源码 zip / tar.gz |
+| 临时在线演示 | 本机启动后 `cloudflared tunnel --url http://127.0.0.1:8000`，把临时 HTTPS 地址发给对方 |
+| 长期在线 | 按下文「部署」章节用 Docker + Caddy 上服务器 |
+
+对方拿到代码后的运行方式：
+
+```powershell
+git clone https://github.com/Hollybooy/dance-learning-assistant.git
+cd dance-learning-assistant
+.\start.bat                 # Windows 一键启动
+# 或手动：
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python run.py
+```
+
+首次运行会自动下载约 5.5MB 的 `pose_landmarker_lite.task` 到 `backend/models/`。上传的教学视频与录制数据都存放在 `backend/data/`，已被 git 忽略，不会随仓库分发。
+
 ## 页面说明（对应设计稿）
 
 | 视图 | 设计稿 | 功能 |
@@ -53,14 +82,27 @@ python run.py
 
 | 措施 | 说明 |
 |------|------|
-| 单帧在途 | 前端收到上一帧结果后才发下一帧，绝不堆积帧队列 |
+| 2 帧在途 | 前端最多同时有 2 帧未回包，吞吐不再被单次往返卡死，端到端延时仍只有一帧左右 |
 | 服务端丢帧 | 新帧到达时若上一帧仍在推理，直接丢弃，链路始终处理最新画面 |
 | 推理串行 | 每个 MediaPipe 实例固定单线程执行器，避免实例并发不安全与 CPU 抢占 |
 | 轻量模型 | `POSE_MODEL_COMPLEXITY=0`（Lite）；采集 640x480、JPEG q=0.6 |
-| 端上绘制 | 服务端只回 33 个关键点（约 2KB），骨架由 Canvas 绘制 |
+| 端上绘制 | 服务端只回 33 个关键点 + 96×96 掩码，骨架与阴影由 Canvas 绘制 |
 | 关闭心跳 | 启动参数 `ws_ping_interval=None`，减少控制帧干扰 |
 
 界面右上角会显示 `延时 xx ms · 推理 xx ms`（RTT 为端到端往返）。
+
+## 人物阴影与显示开关
+
+轮廓来自 **MediaPipe 自带的人物分割**——与骨架**同一次推理**输出，不需要 SAM3 / YOLO 等额外模型（实测仅增加约 6.5ms）。
+
+| 元素 | 颜色 | 说明 |
+|------|------|------|
+| 教学画面 | 橙色 | 老师的人物剪影 + 骨架参考 |
+| 摄像头画面 | 绿色 | 你自己的人物剪影 + 骨架 |
+| 对比轮廓 | 粉色 | 教学人物剪影与骨架，翻转后映射到你的身体尺度 |
+
+跟练页右下角可独立开关「骨架」与「阴影」：关掉骨架后阴影成为主视觉，关掉阴影后回到纯骨架模式。
+骨架线透明度 0.8、关节点 0.45，避免抢走阴影的视觉焦点。
 
 ## 轮廓对比原理
 
@@ -101,9 +143,12 @@ dance-learning-assistant/
 │   │       ├── video_store.py    # 视频库
 │   │       └── session_store.py  # 录制存储
 │   └── data/                  # 运行时数据（git 忽略）
-│       ├── videos/<id>/{source.mp4, meta.json, pose.json}
-│       └── sessions/<id>/{frames/*.jpg, poses.json, meta.json}
+│       ├── videos/<id>/{source.mp4, meta.json, pose.json, masks.bin}
+│       └── sessions/<id>/{frames/*.jpg, poses.json, masks.bin, meta.json}
+├── DEVLOG.md / DEVLOG.txt      # 开发日志（技术栈 / Bug 复盘 / 优化 / 时间线）
 ```
+
+> `masks.bin` 为人物分割掩码：每帧 `uint32(LE) 长度 + PNG 字节`，与 `pose.json` 帧一一对应。
 
 ## 部署（Docker + Caddy，自动 HTTPS）
 
@@ -187,7 +232,7 @@ WebSocket 协议：
 |------|------|------|
 | `DANCEMATE_SEGMENT_SECONDS` | 10 | 切片间隔 |
 | `DANCEMATE_TEACH_FPS` | 15 | 教学骨架采样帧率 |
-| `DANCEMATE_RECORD_FPS` | 12 | 回放录制帧率 |
+| `DANCEMATE_RECORD_FPS` | 24 | 回放录制帧率（实际约 20fps，受机器负载与网络影响）|
 | `DANCEMATE_POSE_COMPLEXITY` | 0 | 0=Lite，1=Full（更准但更慢） |
 | `DANCEMATE_MAX_UPLOAD_MB` | 800 | 上传大小上限 |
 | `DANCEMATE_DATA_DIR` | `backend/data` | 数据目录 |
