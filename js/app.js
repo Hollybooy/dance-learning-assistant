@@ -33,13 +33,26 @@ const state = {
 
 // 各视频的人物分割掩码帧（masks.bin 解析结果）；null 表示该视频没有掩码数据
 const teachMaskFrames = new Map();
-const maskCache = createMaskCache();
+// 缓存窗口要大于预取跨度，否则顺序播放时每帧都是新 key，永远命中不了
+const maskCache = createMaskCache(400);
+// 上一帧已解码的轮廓：当前帧未就绪时沿用，避免阴影忽隐忽现
+let lastTeachMask = null;
 
 /** 取教学掩码位图：命中返回位图，未命中返回 null 并在后台预热。 */
 function getTeachMask(videoId, frameIndex) {
   const frames = teachMaskFrames.get(videoId);
   if (!frames || frameIndex == null || frameIndex >= frames.length) return null;
   return maskCache.get(`${videoId}:${frameIndex}`, async () => frames[frameIndex]);
+}
+
+/** 预解码后续教学帧掩码（教学 15fps，预取约 1 秒的量）。 */
+function warmTeachMasks(videoId, frameIndex, span = 16) {
+  const frames = teachMaskFrames.get(videoId);
+  if (!frames || frameIndex == null) return;
+  const end = Math.min(frames.length, frameIndex + span);
+  for (let i = Math.max(0, frameIndex); i < end; i += 1) {
+    if (frames[i]) maskCache.get(`${videoId}:${i}`, async () => frames[i]);
+  }
 }
 
 const teachVideo = $('teach-video');
@@ -182,6 +195,7 @@ async function selectVideo(meta) {
   state.segments = meta.segments || [];
   state.current = 0;
   state.teachFrames = [];
+  lastTeachMask = null; // 换视频后旧轮廓不再对应
 
   teachVideo.src = api.streamUrl(meta.id);
   teachVideo.load();
@@ -688,7 +702,10 @@ function drawTeachOverlay() {
     // 教学视角人物阴影（教学画布不镜像，掩码直接绘制）
     if (state.shadows && state.video) {
       const maskBitmap = getTeachMask(state.video.id, frame.i);
-      if (maskBitmap) drawShadow(ctx, maskBitmap, rect, '#ffb020', 0.28);
+      if (maskBitmap) lastTeachMask = maskBitmap;
+      const activeMask = maskBitmap || lastTeachMask;
+      if (activeMask) drawShadow(ctx, activeMask, rect, '#ffb020', 0.28);
+      warmTeachMasks(state.video.id, frame.i);
     }
     if (state.skeleton) {
       drawPose(ctx, frame.pose, rect, {
@@ -755,9 +772,11 @@ function drawCameraOverlay() {
           // 教学人物阴影：翻转后按人体尺度映射到你的画面
           if (state.shadows && state.video) {
             const maskBitmap = getTeachMask(state.video.id, teaching.i);
-            if (maskBitmap) {
+            if (maskBitmap) lastTeachMask = maskBitmap;
+            const activeMask = maskBitmap || lastTeachMask;
+            if (activeMask) {
               const shadowRect = mapShadowRect(flippedTeach, teachRect, state.livePose, rect);
-              if (shadowRect) drawShadow(ctx, maskBitmap, shadowRect, '#ff5c8a', 0.22, true);
+              if (shadowRect) drawShadow(ctx, activeMask, shadowRect, '#ff5c8a', 0.22, true);
             }
           }
           drawPose(ctx, mapped, rect, {

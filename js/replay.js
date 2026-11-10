@@ -40,7 +40,12 @@ export class ReplayPlayer {
     // 录制帧的人物掩码（顺序与 poses.json 帧一致）与教学掩码缓存
     this.maskFrames = null;
     this.teachMaskFrames = null;
-    this.maskCache = createMaskCache();
+    // 缓存要覆盖整个预取窗口（否则顺序播放时每帧都是新 key，命中率为 0）
+    this.maskCache = createMaskCache(600);
+    // 上一帧已解码的轮廓：当前帧还没解出来时先沿用，避免阴影忽隐忽现
+    this._selfMaskBmp = null;
+    this._teachMaskBmp = null;
+    this._redrawPending = false;
 
     if (!canvas.width || !canvas.height) {
       canvas.width = 640;
@@ -68,6 +73,8 @@ export class ReplayPlayer {
     this.teachFrames = [];
     this.maskFrames = null;
     this.teachMaskFrames = null;
+    this._selfMaskBmp = null;
+    this._teachMaskBmp = null;
 
     if (session.video_id) {
       try {
@@ -103,6 +110,8 @@ export class ReplayPlayer {
       this.canvas.height = first.naturalHeight;
     }
 
+    // 首帧就绪前先解码开头一段掩码，播放一开始阴影就是完整的
+    this._warmMasks(0);
     this._draw();
     this._syncBar();
     return this.frames.length;
@@ -174,10 +183,14 @@ export class ReplayPlayer {
       // 自己的人物阴影（录制时保存的人物分割掩码）
       if (this.showShadow && this.maskFrames) {
         const maskData = this.maskFrames[entry.i - 1] ?? null;
-        if (maskData) {
-          const bitmap = this.maskCache.get(`rec:${entry.i}`, async () => maskData);
-          if (bitmap) drawShadow(ctx, bitmap, rect, '#00e5a0', 0.35);
-        }
+        const bitmap = maskData
+          ? this.maskCache.get(`rec:${entry.i}`, async () => maskData)
+          : null;
+        if (bitmap) this._selfMaskBmp = bitmap;
+        // 当前帧解码未就绪时沿用上一帧轮廓：宁可滞后一帧，也不让阴影忽隐忽现
+        const activeMask = bitmap || this._selfMaskBmp;
+        if (activeMask) drawShadow(ctx, activeMask, rect, '#00e5a0', 0.35);
+        else this._scheduleRedraw();
       }
       drawPose(ctx, entry.pose, rect, {
         color: '#00e5a0',
@@ -198,16 +211,16 @@ export class ReplayPlayer {
           // 教学人物阴影：同样翻转后按人体尺度映射
           if (this.showShadow && this.teachMaskFrames && teachFrame.i != null) {
             const teachMask = this.teachMaskFrames[teachFrame.i] ?? null;
-            if (teachMask) {
-              const bitmap = this.maskCache.get(
-                `teach:${teachFrame.i}`,
-                async () => teachMask
-              );
-              const shadowRect = mapShadowRect(flippedTeach, rect, entry.pose, rect);
-              if (bitmap && shadowRect) {
-                drawShadow(ctx, bitmap, shadowRect, '#ff5c8a', 0.22, true);
-              }
+            const bitmap = teachMask
+              ? this.maskCache.get(`teach:${teachFrame.i}`, async () => teachMask)
+              : null;
+            if (bitmap) this._teachMaskBmp = bitmap;
+            const activeMask = bitmap || this._teachMaskBmp;
+            const shadowRect = mapShadowRect(flippedTeach, rect, entry.pose, rect);
+            if (activeMask && shadowRect) {
+              drawShadow(ctx, activeMask, shadowRect, '#ff5c8a', 0.22, true);
             }
+            this._warmTeachMasks(teachFrame.i);
           }
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',
@@ -220,10 +233,43 @@ export class ReplayPlayer {
       }
     }
 
-    // 预加载后续帧，保证播放顺滑
+    // 预加载后续帧（画面 + 掩码），保证播放顺滑且阴影不闪
     for (let i = index; i < Math.min(this.frames.length, index + PRELOAD_AHEAD); i += 1) {
       this._image(this.frames[i].i);
     }
+    this._warmMasks(index);
+  }
+
+  /** 预解码后续录制帧掩码：把"每帧现解"改成"提前解码"，播放时直接命中缓存。 */
+  _warmMasks(index) {
+    if (!this.maskFrames) return;
+    const end = Math.min(this.frames.length, index + PRELOAD_AHEAD);
+    for (let i = Math.max(0, index); i < end; i += 1) {
+      const frameIndex = this.frames[i]?.i;
+      if (!frameIndex) continue;
+      const data = this.maskFrames[frameIndex - 1];
+      if (data) this.maskCache.get(`rec:${frameIndex}`, async () => data);
+    }
+  }
+
+  /** 预解码后续教学帧掩码（教学帧率低于回放帧率，预热窗口足够覆盖）。 */
+  _warmTeachMasks(startIndex) {
+    if (!this.teachMaskFrames || startIndex == null) return;
+    const end = Math.min(this.teachMaskFrames.length, startIndex + PRELOAD_AHEAD);
+    for (let i = Math.max(0, startIndex); i < end; i += 1) {
+      const data = this.teachMaskFrames[i];
+      if (data) this.maskCache.get(`teach:${i}`, async () => data);
+    }
+  }
+
+  /** 暂停状态下首帧掩码还在解码：稍后补画一帧，避免暂停时看不到阴影。 */
+  _scheduleRedraw() {
+    if (this.playing || this._redrawPending) return;
+    this._redrawPending = true;
+    setTimeout(() => {
+      this._redrawPending = false;
+      if (!this.playing && this.session) this._draw();
+    }, 120);
   }
 
   _syncBar() {
@@ -254,6 +300,10 @@ export class ReplayPlayer {
 
   seek(t) {
     this.playhead = Math.min(this.duration, Math.max(0, t));
+    // 跳转后旧轮廓不再对应当前画面，清掉并预热新位置，等解码完成再补画
+    this._selfMaskBmp = null;
+    this._teachMaskBmp = null;
+    this._warmMasks(Math.max(0, this._frameIndex(this.playhead)));
     this._draw();
     this._syncBar();
   }
