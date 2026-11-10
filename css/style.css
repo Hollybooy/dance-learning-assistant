@@ -119,6 +119,24 @@ body {
 }
 .toggle input { accent-color: var(--accent); }
 
+/* 骨架/阴影显示开关 */
+.vis-btn {
+  border: 1px solid #3a4552;
+  background: #1b232c;
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.vis-btn:hover { border-color: #4d5c6c; }
+.vis-btn.active {
+  background: rgba(0, 229, 160, .13);
+  border-color: rgba(0, 229, 160, .55);
+  color: var(--accent);
+}
+
 .empty-hint {
   font-size: 13px;
   color: var(--text-dim);

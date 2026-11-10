@@ -34,6 +34,7 @@ export function drawPose(ctx, pose, rect, options = {}) {
     color = '#00e5a0',
     lineWidth = 3,
     alpha = 1,
+    jointAlpha = 1,
     dashed = false,
     joints = true,
     shadow = false,
@@ -65,13 +66,16 @@ export function drawPose(ctx, pose, rect, options = {}) {
 
   if (joints) {
     ctx.setLineDash([]);
+    // 关节点的可见度单独控制：阴影为主视觉时，点只做淡辅助
+    ctx.globalAlpha = alpha * jointAlpha;
     for (const index of KEY_JOINTS) {
       const p = pose[index];
       if (!p || (p[3] ?? 1) < MIN_VISIBILITY) continue;
       ctx.beginPath();
-      ctx.arc(rect.x + p[0] * rect.w, rect.y + p[1] * rect.h, lineWidth * 1.2, 0, Math.PI * 2);
+      ctx.arc(rect.x + p[0] * rect.w, rect.y + p[1] * rect.h, lineWidth * 1.1, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = alpha;
   }
   ctx.restore();
 }

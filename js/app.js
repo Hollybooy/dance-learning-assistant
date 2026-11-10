@@ -22,6 +22,8 @@ const state = {
   teachCache: new Map(),
   livePose: null,
   compare: true,
+  skeleton: true,
+  shadows: true,
   speed: 1,
   recording: false,
   currentSessionId: null,
@@ -526,8 +528,6 @@ $('search-input').addEventListener('keydown', (event) => {
 
 /* ------------------------------------------------------------ 实时跟练 */
 
-state.shadows = true;
-
 const live = new LivePoseStream({
   video: cameraVideo,
   onPose: ({ pose, mask, serverMs, rtt }) => {
@@ -690,9 +690,17 @@ function drawTeachOverlay() {
       const maskBitmap = getTeachMask(state.video.id, frame.i);
       if (maskBitmap) drawShadow(ctx, maskBitmap, rect, '#ffb020', 0.28);
     }
-    drawPose(ctx, frame.pose, rect, { color: '#ffb020', lineWidth: 3, shadow: true });
+    if (state.skeleton) {
+      drawPose(ctx, frame.pose, rect, {
+        color: '#ffb020',
+        lineWidth: 2.5,
+        alpha: 0.8,
+        jointAlpha: 0.45,
+        shadow: true,
+      });
+    }
 
-    if (state.compare && state.livePose && cameraVideo.videoWidth) {
+    if (state.skeleton && state.compare && state.livePose && cameraVideo.videoWidth) {
       const liveRect = { x: 0, y: 0, w: cameraVideo.videoWidth, h: cameraVideo.videoHeight };
       // 摄像头为镜像显示：把你的骨架先翻转到正向视角，再映射到教学画面
       const mapped = mapPose(flipX(state.livePose), liveRect, frame.pose, rect);
@@ -701,7 +709,8 @@ function drawTeachOverlay() {
           color: '#00e5a0',
           lineWidth: 2,
           dashed: true,
-          alpha: 0.7,
+          alpha: 0.55,
+          jointAlpha: 0.45,
         });
       }
     }
@@ -720,9 +729,17 @@ function drawCameraOverlay() {
     if (state.shadows && state.liveMask) {
       drawShadow(ctx, state.liveMask, rect, '#00e5a0', 0.35);
     }
-    drawPose(ctx, state.livePose, rect, { color: '#00e5a0', lineWidth: 3, shadow: true });
+    if (state.skeleton) {
+      drawPose(ctx, state.livePose, rect, {
+        color: '#00e5a0',
+        lineWidth: 2.5,
+        alpha: 0.8,
+        jointAlpha: 0.45,
+        shadow: true,
+      });
+    }
 
-    if (state.compare && teachVideo.videoWidth && state.teachFrames.length) {
+    if (state.skeleton && state.compare && teachVideo.videoWidth && state.teachFrames.length) {
       const teaching = poseAt(state.teachFrames, teachVideo.currentTime);
       if (teaching?.pose) {
         const teachRect = {
@@ -747,7 +764,8 @@ function drawCameraOverlay() {
             color: '#ff5c8a',
             lineWidth: 2.5,
             dashed: true,
-            alpha: 0.9,
+            alpha: 0.6,
+            jointAlpha: 0.45,
           });
         }
       }
@@ -795,9 +813,28 @@ const player = new ReplayPlayer({
   },
 });
 
-$('shadow-toggle').addEventListener('change', (event) => {
-  state.shadows = event.target.checked;
+/* 骨架 / 阴影显示开关（按钮高亮 = 当前可见） */
+function syncVisButtons() {
+  const skeletonBtn = $('skeleton-toggle');
+  skeletonBtn.classList.toggle('active', state.skeleton);
+  skeletonBtn.textContent = state.skeleton ? '隐藏骨架' : '显示骨架';
+
+  const shadowBtn = $('shadow-toggle');
+  shadowBtn.classList.toggle('active', state.shadows);
+  shadowBtn.textContent = state.shadows ? '隐藏阴影' : '显示阴影';
+}
+
+$('skeleton-toggle').addEventListener('click', () => {
+  state.skeleton = !state.skeleton;
+  syncVisButtons();
 });
+
+$('shadow-toggle').addEventListener('click', () => {
+  state.shadows = !state.shadows;
+  syncVisButtons();
+});
+
+syncVisButtons();
 
 $('replay-compare').addEventListener('change', (event) => {
   player.showTeach = event.target.checked;

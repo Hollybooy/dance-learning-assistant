@@ -179,7 +179,13 @@ export class ReplayPlayer {
           if (bitmap) drawShadow(ctx, bitmap, rect, '#00e5a0', 0.35);
         }
       }
-      drawPose(ctx, entry.pose, rect, { color: '#00e5a0', lineWidth: 4, shadow: true });
+      drawPose(ctx, entry.pose, rect, {
+        color: '#00e5a0',
+        lineWidth: 3,
+        alpha: 0.8,
+        jointAlpha: 0.45,
+        shadow: true,
+      });
     }
 
     if (this.showTeach && entry.pose && this.teachFrames.length) {
@@ -205,9 +211,10 @@ export class ReplayPlayer {
           }
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',
-            lineWidth: 3,
+            lineWidth: 2.5,
             dashed: true,
-            alpha: 0.95,
+            alpha: 0.6,
+            jointAlpha: 0.45,
           });
         }
       }
