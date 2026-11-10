@@ -37,6 +37,9 @@ class VideoStore:
     def pose_path(self, video_id: str) -> Path:
         return self.folder(video_id) / "pose.json"
 
+    def masks_path(self, video_id: str) -> Path:
+        return self.folder(video_id) / "masks.bin"
+
     def source_path(self, video_id: str) -> Optional[Path]:
         meta = self.get(video_id)
         if not meta:

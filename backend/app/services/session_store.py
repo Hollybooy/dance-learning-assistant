@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import struct
 import time
 import uuid
 from datetime import datetime, timezone
@@ -61,10 +62,17 @@ class SessionRecorder:
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=120)
         self._closed = False
         self._writer = asyncio.create_task(self._run_writer())
+        self._masks_path = self.dir / "masks.bin"
+        self._masks_buf = open(self._masks_path, "wb")
 
     # ---------- 写入 ----------
 
-    def submit(self, jpeg: bytes, pose: Optional[List[List[float]]]) -> None:
+    def submit(
+        self,
+        jpeg: bytes,
+        pose: Optional[List[List[float]]],
+        mask: Optional[bytes] = None,
+    ) -> None:
         if self._closed:
             return
         now = time.time()
@@ -77,23 +85,30 @@ class SessionRecorder:
             return
         self._budget = min(self._budget - 1.0, 1.0)  # 停顿后不爆发补存
         try:
-            self._queue.put_nowait((jpeg, pose, now - self._start))
+            self._queue.put_nowait((jpeg, pose, mask, now - self._start))
         except asyncio.QueueFull:
             pass  # 磁盘跟不上时丢弃，优先保证实时链路
 
     async def _run_writer(self) -> None:
+        loop = asyncio.get_running_loop()
         while True:
             item = await self._queue.get()
             if item is None:
                 break
-            jpeg, pose, t = item
+            jpeg, pose, mask, t = item
             self.frame_count += 1
             index = self.frame_count
             await asyncio.to_thread(
                 (self.dir / "frames" / f"{index:05d}.jpg").write_bytes, jpeg
             )
+            await loop.run_in_executor(None, self._append_mask, mask or b"")
             self.duration = max(self.duration, round(t, 3))
             self.poses.append({"i": index, "t": round(t, 3), "pose": pose})
+
+    def _append_mask(self, data: bytes) -> None:
+        """masks.bin：每帧 uint32(LE) 长度 + PNG 字节，顺序与 poses.json 一致。"""
+        self._masks_buf.write(struct.pack("<I", len(data)))
+        self._masks_buf.write(data)
 
     # ---------- 元数据 ----------
 
@@ -114,6 +129,7 @@ class SessionRecorder:
             "fps": RECORD_FPS,
             "frames_url": f"/media/sessions/{self.id}/frames/",
             "thumbnail_url": f"/media/sessions/{self.id}/frames/00001.jpg",
+            "masks_url": f"/media/sessions/{self.id}/masks.bin",
         }
 
     async def stop(self) -> Dict[str, Any]:
@@ -121,6 +137,7 @@ class SessionRecorder:
             self._closed = True
             await self._queue.put(None)
             await self._writer
+            self._masks_buf.close()
 
         meta = self.meta()
         await asyncio.to_thread(self._write_files, meta)

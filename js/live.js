@@ -33,6 +33,7 @@ export class LivePoseStream {
     this._inFlight = 0;
     this._slotWaiters = [];
     this._lastSendAt = 0;
+    this._latestMask = null; // 最近解码的人物掩码 ImageBitmap
     this._canvas = document.createElement('canvas');
     this._canvas.width = CAPTURE_WIDTH;
     this._canvas.height = CAPTURE_HEIGHT;
@@ -182,8 +183,22 @@ export class LivePoseStream {
   _handle(message) {
     if (message.type === 'pose') {
       const rtt = this.sentAt ? performance.now() - this.sentAt : 0;
+      // 掩码异步解码：骨架先走不阻塞显示，位图就位后下一帧起用于绘制阴影
+      if (message.mask) {
+        const binary = atob(message.mask);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        createImageBitmap(new Blob([bytes], { type: 'image/png' }))
+          .then((bitmap) => {
+            this._latestMask = bitmap;
+          })
+          .catch(() => {});
+      } else {
+        this._latestMask = null;
+      }
       this.onPose?.({
         pose: message.pose,
+        mask: this._latestMask ?? null,
         serverMs: message.server_ms ?? 0,
         rtt,
         dropped: message.dropped ?? 0,

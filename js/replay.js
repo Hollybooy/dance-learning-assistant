@@ -5,18 +5,28 @@
  * 按人体尺度映射到回放人物身上，形成"教学 vs 实际"的叠加对比。
  */
 
-import { drawPose, mapPose, poseAt, flipX } from './pose.js';
+import {
+  drawPose,
+  drawShadow,
+  mapPose,
+  mapShadowRect,
+  poseAt,
+  flipX,
+  parseMaskBin,
+  createMaskCache,
+} from './pose.js';
 
 const PRELOAD_AHEAD = 36;
 
 export class ReplayPlayer {
-  constructor({ canvas, seekBar, timeLabel, playButton, getTeachFrames }) {
+  constructor({ canvas, seekBar, timeLabel, playButton, getTeachFrames, getTeachMasks }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.seekBar = seekBar;
     this.timeLabel = timeLabel;
     this.playButton = playButton;
     this.getTeachFrames = getTeachFrames;
+    this.getTeachMasks = getTeachMasks || null;
 
     this.session = null;
     this.frames = [];
@@ -25,7 +35,12 @@ export class ReplayPlayer {
     this.playhead = 0;
     this.playing = false;
     this.showTeach = true;
+    this.showShadow = true;
     this.images = new Map();
+    // 录制帧的人物掩码（顺序与 poses.json 帧一致）与教学掩码缓存
+    this.maskFrames = null;
+    this.teachMaskFrames = null;
+    this.maskCache = createMaskCache();
 
     if (!canvas.width || !canvas.height) {
       canvas.width = 640;
@@ -51,12 +66,28 @@ export class ReplayPlayer {
     this.playhead = 0;
     this.images.clear();
     this.teachFrames = [];
+    this.maskFrames = null;
+    this.teachMaskFrames = null;
 
     if (session.video_id) {
       try {
         this.teachFrames = (await this.getTeachFrames(session.video_id)) || [];
       } catch {
         this.teachFrames = [];
+      }
+      if (this.getTeachMasks) {
+        this.teachMaskFrames = await this.getTeachMasks(session.video_id).catch(() => null);
+      }
+    }
+
+    // 录制侧掩码（可能不存在：老录制）
+    if (session.masks_url) {
+      try {
+        const res = await fetch(session.masks_url);
+        if (!res.ok) throw new Error('no masks');
+        this.maskFrames = parseMaskBin(await res.arrayBuffer());
+      } catch {
+        this.maskFrames = null;
       }
     }
 
@@ -140,15 +171,38 @@ export class ReplayPlayer {
 
     const rect = { x: 0, y: 0, w: canvas.width, h: canvas.height };
     if (entry.pose) {
+      // 自己的人物阴影（录制时保存的人物分割掩码）
+      if (this.showShadow && this.maskFrames) {
+        const maskData = this.maskFrames[entry.i - 1] ?? null;
+        if (maskData) {
+          const bitmap = this.maskCache.get(`rec:${entry.i}`, async () => maskData);
+          if (bitmap) drawShadow(ctx, bitmap, rect, '#00e5a0', 0.35);
+        }
+      }
       drawPose(ctx, entry.pose, rect, { color: '#00e5a0', lineWidth: 4, shadow: true });
     }
 
     if (this.showTeach && entry.pose && this.teachFrames.length) {
       const teachFrame = poseAt(this.teachFrames, this._teachTime(entry.t));
       if (teachFrame?.pose) {
+        const flippedTeach = flipX(teachFrame.pose);
         // 教学骨架先翻转到镜像视角，再映射到录制画面上，左右方向与实际动作一致
-        const mapped = mapPose(flipX(teachFrame.pose), rect, entry.pose, rect);
+        const mapped = mapPose(flippedTeach, rect, entry.pose, rect);
         if (mapped) {
+          // 教学人物阴影：同样翻转后按人体尺度映射
+          if (this.showShadow && this.teachMaskFrames && teachFrame.i != null) {
+            const teachMask = this.teachMaskFrames[teachFrame.i] ?? null;
+            if (teachMask) {
+              const bitmap = this.maskCache.get(
+                `teach:${teachFrame.i}`,
+                async () => teachMask
+              );
+              const shadowRect = mapShadowRect(flippedTeach, rect, entry.pose, rect);
+              if (bitmap && shadowRect) {
+                drawShadow(ctx, bitmap, shadowRect, '#ff5c8a', 0.22, true);
+              }
+            }
+          }
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',
             lineWidth: 3,

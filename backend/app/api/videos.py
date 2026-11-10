@@ -211,6 +211,7 @@ async def _run_analysis(video_id: str) -> None:
             video_store.pose_path(video_id),
             TEACH_SAMPLE_FPS,
             _progress,
+            video_store.masks_path(video_id),
         )
         video_store.update(
             video_id,
@@ -218,6 +219,7 @@ async def _run_analysis(video_id: str) -> None:
             pose_progress=1.0,
             pose_frames=info["frames"],
             pose_sample_fps=info["fps"],
+            masks_url=f"/media/videos/{video_id}/masks.bin",
         )
         logger.info("骨架分析完成 video=%s frames=%s", video_id, info["frames"])
     except Exception as exc:  # noqa: BLE001

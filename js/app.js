@@ -3,6 +3,12 @@
 import { api } from './api.js';
 import { fitRect, drawPose, mapPose, poseAt, flipX } from './pose.js';
 import { LivePoseStream } from './live.js';
+import {
+  createMaskCache,
+  drawShadow,
+  mapShadowRect,
+  parseMaskBin,
+} from './pose.js';
 import { ReplayPlayer } from './replay.js';
 
 const $ = (id) => document.getElementById(id);
@@ -20,6 +26,19 @@ const state = {
   recording: false,
   currentSessionId: null,
 };
+
+/* ------------------------------------------------------------ 人物阴影 */
+
+// 各视频的人物分割掩码帧（masks.bin 解析结果）；null 表示该视频没有掩码数据
+const teachMaskFrames = new Map();
+const maskCache = createMaskCache();
+
+/** 取教学掩码位图：命中返回位图，未命中返回 null 并在后台预热。 */
+function getTeachMask(videoId, frameIndex) {
+  const frames = teachMaskFrames.get(videoId);
+  if (!frames || frameIndex == null || frameIndex >= frames.length) return null;
+  return maskCache.get(`${videoId}:${frameIndex}`, async () => frames[frameIndex]);
+}
 
 const teachVideo = $('teach-video');
 const cameraVideo = $('camera-video');
@@ -223,11 +242,33 @@ async function ensureTeachPoseLoaded() {
 async function loadTeachPose(videoId) {
   try {
     const pose = await api.getPose(videoId);
-    state.teachFrames = pose.frames || [];
-    state.teachCache.set(videoId, state.teachFrames);
-    $('teach-badge').textContent = `骨架就绪 ${state.teachFrames.length} 帧`;
+    const frames = pose.frames || [];
+    frames.forEach((frame, index) => {
+      frame.i = index; // 掩码帧序号（masks.bin 与 pose.json 帧一一对应）
+    });
+    state.teachFrames = frames;
+    state.teachCache.set(videoId, frames);
+    $('teach-badge').textContent = `骨架就绪 ${frames.length} 帧`;
+    loadTeachMasks(videoId);
   } catch (error) {
     $('teach-badge').textContent = '骨架未就绪';
+  }
+}
+
+/** 加载视频的人物分割掩码（老视频没有该文件时静默降级为纯骨架）。 */
+async function loadTeachMasks(videoId, urlOverride = null) {
+  if (teachMaskFrames.has(videoId)) return;
+  const url = urlOverride ?? (state.video?.id === videoId ? state.video?.masks_url : null);
+  if (!url) {
+    teachMaskFrames.set(videoId, null);
+    return;
+  }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('no masks');
+    teachMaskFrames.set(videoId, parseMaskBin(await res.arrayBuffer()));
+  } catch {
+    teachMaskFrames.set(videoId, null);
   }
 }
 
@@ -485,10 +526,13 @@ $('search-input').addEventListener('keydown', (event) => {
 
 /* ------------------------------------------------------------ 实时跟练 */
 
+state.shadows = true;
+
 const live = new LivePoseStream({
   video: cameraVideo,
-  onPose: ({ pose, serverMs, rtt }) => {
+  onPose: ({ pose, mask, serverMs, rtt }) => {
     state.livePose = pose;
+    state.liveMask = mask ?? null;
     $('latency-badge').textContent = `延时 ${Math.round(rtt)}ms · 推理 ${Math.round(serverMs)}ms`;
     $('conn-badge').textContent = '实时链路在线';
   },
@@ -641,6 +685,11 @@ function drawTeachOverlay() {
   const frame = poseAt(state.teachFrames, teachVideo.currentTime);
 
   if (frame?.pose) {
+    // 教学视角人物阴影（教学画布不镜像，掩码直接绘制）
+    if (state.shadows && state.video) {
+      const maskBitmap = getTeachMask(state.video.id, frame.i);
+      if (maskBitmap) drawShadow(ctx, maskBitmap, rect, '#ffb020', 0.28);
+    }
     drawPose(ctx, frame.pose, rect, { color: '#ffb020', lineWidth: 3, shadow: true });
 
     if (state.compare && state.livePose && cameraVideo.videoWidth) {
@@ -667,6 +716,10 @@ function drawCameraOverlay() {
   const rect = fitRect(width, height, cameraVideo.videoWidth, cameraVideo.videoHeight);
 
   if (state.livePose) {
+    // 自己的人物阴影（掩码即摄像头视角，与画布一起被 CSS 镜像）
+    if (state.shadows && state.liveMask) {
+      drawShadow(ctx, state.liveMask, rect, '#00e5a0', 0.35);
+    }
     drawPose(ctx, state.livePose, rect, { color: '#00e5a0', lineWidth: 3, shadow: true });
 
     if (state.compare && teachVideo.videoWidth && state.teachFrames.length) {
@@ -679,8 +732,17 @@ function drawCameraOverlay() {
           h: teachVideo.videoHeight,
         };
         // 教学骨架先翻转到镜像视角，再映射到你身上，左右方向与所见一致
-        const mapped = mapPose(flipX(teaching.pose), teachRect, state.livePose, rect);
+        const flippedTeach = flipX(teaching.pose);
+        const mapped = mapPose(flippedTeach, teachRect, state.livePose, rect);
         if (mapped) {
+          // 教学人物阴影：翻转后按人体尺度映射到你的画面
+          if (state.shadows && state.video) {
+            const maskBitmap = getTeachMask(state.video.id, teaching.i);
+            if (maskBitmap) {
+              const shadowRect = mapShadowRect(flippedTeach, teachRect, state.livePose, rect);
+              if (shadowRect) drawShadow(ctx, maskBitmap, shadowRect, '#ff5c8a', 0.22, true);
+            }
+          }
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',
             lineWidth: 2.5,
@@ -710,9 +772,31 @@ const player = new ReplayPlayer({
   getTeachFrames: async (videoId) => {
     if (state.teachCache.has(videoId)) return state.teachCache.get(videoId);
     const pose = await api.getPose(videoId);
-    state.teachCache.set(videoId, pose.frames || []);
-    return pose.frames || [];
+    const frames = pose.frames || [];
+    frames.forEach((frame, index) => {
+      frame.i = index;
+    });
+    state.teachCache.set(videoId, frames);
+    return frames;
   },
+  getTeachMasks: async (videoId) => {
+    if (!teachMaskFrames.has(videoId)) {
+      let url = state.video?.id === videoId ? state.video?.masks_url : null;
+      if (!url) {
+        try {
+          url = (await api.getVideo(videoId)).masks_url ?? null;
+        } catch {
+          url = null;
+        }
+      }
+      await loadTeachMasks(videoId, url);
+    }
+    return teachMaskFrames.get(videoId) ?? null;
+  },
+});
+
+$('shadow-toggle').addEventListener('change', (event) => {
+  state.shadows = event.target.checked;
 });
 
 $('replay-compare').addEventListener('change', (event) => {

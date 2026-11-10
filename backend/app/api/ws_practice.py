@@ -8,7 +8,7 @@
         {"type":"ping"}
     服务端 → 客户端
         {"type":"ready","record_fps":12,"server_ms":..}
-        {"type":"pose","pose":[[x,y,z,v],..]|null,"server_ms":..,"dropped":n,"ts":..}
+        {"type":"pose","pose":[[x,y,z,v],..]|null,"mask":"<灰度PNG base64>|null","server_ms":..,"dropped":n,"ts":..}
         {"type":"record_started","session_id":..}
         {"type":"record_stopped","session":{...}}
         {"type":"pong"}
@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -45,8 +46,9 @@ async def practice_socket(ws: WebSocket) -> None:
         "busy": False,
         "dropped": 0,
         "closed": False,
-        # 最近一次稳定后的骨架：录制与推理解耦后，录制帧就用它当骨架
+        # 最近一次稳定后的骨架与人物掩码：录制与推理解耦后，录制帧就用它们
         "latest_pose": None,
+        "latest_mask": None,
     }
     recorder: Optional[SessionRecorder] = None
     stabilizer = PoseStabilizer()
@@ -65,15 +67,18 @@ async def practice_socket(ws: WebSocket) -> None:
         state["busy"] = True
         try:
             started = time.perf_counter()
-            pose = await live_pose_engine.estimate_jpeg(data)
+            pose, mask = await live_pose_engine.estimate_jpeg_with_mask(data)
             # 漂移帧剔除 + 自适应平滑 + 丢帧补齐（实时显示与录制共用同一结果）
             pose = stabilizer.filter(pose)
             state["latest_pose"] = pose
+            state["latest_mask"] = mask
             server_ms = (time.perf_counter() - started) * 1000.0
             await send_json(
                 {
                     "type": "pose",
                     "pose": pose,
+                    # 人物分割掩码（灰度 PNG base64），前端着色绘制人物阴影
+                    "mask": base64.b64encode(mask).decode("ascii") if mask else None,
                     "server_ms": round(server_ms, 1),
                     "dropped": state["dropped"],
                     "ts": round(time.time(), 4),
@@ -100,7 +105,7 @@ async def practice_socket(ws: WebSocket) -> None:
                 # 录制与推理解耦：推理忙时也按帧率存帧，骨架沿用最近一次稳定结果，
                 # 这样录制帧率不再被推理吞吐卡住（回放更流畅）
                 if recorder is not None:
-                    recorder.submit(data, state["latest_pose"])
+                    recorder.submit(data, state["latest_pose"], state["latest_mask"])
                 asyncio.create_task(process_frame(data))
                 continue
 

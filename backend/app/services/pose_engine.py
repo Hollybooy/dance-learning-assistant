@@ -26,6 +26,8 @@ from .model_store import ensure_pose_model
 class PoseEngine:
     """串行执行 MediaPipe Pose 推理的引擎。"""
 
+    MASK_SIZE = 96  # 人物分割掩码统一缩放到的边长（前端再拉伸绘制）
+
     def __init__(
         self,
         model_complexity: int = POSE_MODEL_COMPLEXITY,
@@ -33,11 +35,13 @@ class PoseEngine:
         smooth_landmarks: bool = True,
         name: str = "pose",
         variant: str = POSE_MODEL_VARIANT,
+        with_segmentation: bool = False,
     ) -> None:
         self._model_complexity = model_complexity
         self._static_image_mode = static_image_mode
         self._smooth = smooth_landmarks
         self._variant = variant
+        self._with_segmentation = with_segmentation
         self._impl: Optional[str] = None
         self._pose = None
         self._lock = threading.Lock()
@@ -65,7 +69,7 @@ class PoseEngine:
                     static_image_mode=self._static_image_mode,
                     model_complexity=self._model_complexity,
                     smooth_landmarks=self._smooth,
-                    enable_segmentation=False,
+                    enable_segmentation=self._with_segmentation,
                     min_detection_confidence=0.5,
                     min_tracking_confidence=0.5,
                 )
@@ -82,30 +86,33 @@ class PoseEngine:
                     min_pose_detection_confidence=0.5,
                     min_pose_presence_confidence=0.5,
                     min_tracking_confidence=0.5,
+                    output_segmentation_masks=self._with_segmentation,
                 )
                 self._pose = vision.PoseLandmarker.create_from_options(options)
         return self._pose
 
     # ---------- 同步接口（离线分析用） ----------
 
-    def estimate_sync(self, frame_bgr: np.ndarray) -> Optional[List[List[float]]]:
-        """返回 33 个关键点 [[x, y, z, visibility], ...]，未检测到返回 None。"""
-        pose = self._ensure_model()
-        mp = self._mp
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        rgb.flags.writeable = False
+    def _encode_mask(self, result) -> Optional[bytes]:
+        """提取人物分割掩码并编码为 PNG。
 
-        if self._impl == "solutions":
-            result = pose.process(rgb)
-            landmarks = result.pose_landmarks.landmark if result.pose_landmarks else None
-        else:
-            image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            self._timestamp_ms += 33
-            result = pose.detect_for_video(image, self._timestamp_ms)
-            landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
-
-        if not landmarks:
+        形状信息必须放在 alpha 通道（RGB 全白、A=人物区域），
+        前端用 source-in 合成直接染色；灰度亮度通道无法参与 canvas 合成。
+        掩码来自与骨架同一次推理（MediaPipe 自带人物分割），无需额外模型。
+        """
+        masks = getattr(result, "segmentation_masks", None)
+        if not masks:
             return None
+        raw = masks[0].numpy_view()
+        binary = (raw[..., 0] > 0.5).astype(np.uint8) * 255
+        resized = cv2.resize(binary, (self.MASK_SIZE, self.MASK_SIZE), interpolation=cv2.INTER_AREA)
+        rgba = np.empty((self.MASK_SIZE, self.MASK_SIZE, 4), dtype=np.uint8)
+        rgba[..., 0:3] = 255
+        rgba[..., 3] = resized
+        ok, buf = cv2.imencode(".png", rgba)
+        return bytes(buf) if ok else None
+
+    def _format_landmarks(self, landmarks) -> List[List[float]]:
         return [
             [
                 round(lm.x, 4),
@@ -115,6 +122,38 @@ class PoseEngine:
             ]
             for lm in landmarks
         ]
+
+    def _detect(self, frame_bgr: np.ndarray):
+        """执行一次推理，返回 (landmarks, result)。"""
+        pose = self._ensure_model()
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+
+        if self._impl == "solutions":
+            result = pose.process(rgb)
+            landmarks = result.pose_landmarks.landmark if result.pose_landmarks else None
+        else:
+            image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
+            self._timestamp_ms += 33
+            result = pose.detect_for_video(image, self._timestamp_ms)
+            landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
+        return landmarks, result
+
+    def estimate_sync(self, frame_bgr: np.ndarray) -> Optional[List[List[float]]]:
+        """返回 33 个关键点 [[x, y, z, visibility], ...]，未检测到返回 None。"""
+        landmarks, _ = self._detect(frame_bgr)
+        if not landmarks:
+            return None
+        return self._format_landmarks(landmarks)
+
+    def estimate_sync_with_mask(
+        self, frame_bgr: np.ndarray
+    ) -> "tuple[Optional[List[List[float]]], Optional[bytes]]":
+        """返回 (关键点, 人物掩码 PNG)；未检测到人时返回 (None, None)。"""
+        landmarks, result = self._detect(frame_bgr)
+        if not landmarks:
+            return None, None
+        return self._format_landmarks(landmarks), self._encode_mask(result)
 
     def estimate_jpeg_sync(self, data: bytes) -> Optional[List[List[float]]]:
         frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
@@ -127,6 +166,19 @@ class PoseEngine:
     async def estimate_jpeg(self, data: bytes) -> Optional[List[List[float]]]:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self.estimate_jpeg_sync, data)
+
+    async def estimate_jpeg_with_mask(
+        self, data: bytes
+    ) -> "tuple[Optional[List[List[float]]], Optional[bytes]]":
+        """推理并返回 (关键点, 人物掩码 PNG)，供实时阴影绘制。"""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, self._estimate_jpeg_mask_sync, data)
+
+    def _estimate_jpeg_mask_sync(self, data: bytes):
+        frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return None, None
+        return self.estimate_sync_with_mask(frame)
 
     async def estimate_frame(self, frame_bgr: np.ndarray) -> Optional[List[List[float]]]:
         loop = asyncio.get_running_loop()
@@ -141,8 +193,9 @@ class PoseEngine:
             self._executor.shutdown(wait=False)
 
 
-# 实时链路共享引擎：所有 WebSocket 会话串行使用，保证 CPU 不被多路抢占
-live_pose_engine = PoseEngine(model_complexity=POSE_MODEL_COMPLEXITY, name="pose-live")
+# 实时链路共享引擎：所有 WebSocket 会话串行使用，保证 CPU 不被多路抢占；
+# 开启人物分割掩码（与骨架同一次推理，供前端绘制人物阴影）
+live_pose_engine = PoseEngine(model_complexity=POSE_MODEL_COMPLEXITY, name="pose-live", with_segmentation=True)
 
 
 class PoseStabilizer:
