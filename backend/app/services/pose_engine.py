@@ -215,9 +215,13 @@ class PoseStabilizer:
     HOLD_SECONDS = 0.5      # 丢帧补齐的最长时长
     ALPHA_MIN = 0.35        # 静止时的平滑系数（越小越稳）
     ALPHA_MAX = 0.85        # 快速动作时的平滑系数（越大越跟手）
+    HAND_ALPHA_CAP = 0.22   # 手部点平滑上限：手腕/手指识别噪声大（"抽搐"），
+                            # 无论动作快慢都强制更平滑
     # 核心关节：头/肩/肘/腕/髋/膝/踝——漂移检测只看这些，
     # 避免大量低可见度或静止点稀释中位数信号
     CORE_JOINTS = (0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+    # 手部点：手腕 + 6 个手指关节（高频抖动源，单独加强平滑）
+    HAND_JOINTS = frozenset((15, 16, 17, 18, 19, 20, 21, 22))
 
     def __init__(self) -> None:
         self._prev: Optional[List[List[float]]] = None
@@ -265,7 +269,7 @@ class PoseStabilizer:
         # 自适应平滑：动得越快越跟手，动得越慢越稳
         alpha = min(self.ALPHA_MAX, self.ALPHA_MIN + jump * 6.0)
         out: List[List[float]] = []
-        for cur, old in zip(pose, self._prev):
+        for i, (cur, old) in enumerate(zip(pose, self._prev)):
             if not cur:
                 out.append(old)
                 continue
@@ -277,11 +281,13 @@ class PoseStabilizer:
                 # 个别关节瞬间飞出（误识别）：钳回上一帧位置，可见度取当前值
                 out.append([old[0], old[1], old[2], cur[3]])
                 continue
+            # 手部点识别噪声大：无论快慢都压低平滑系数上限，抑制抽搐
+            alpha_j = min(alpha, self.HAND_ALPHA_CAP) if i in self.HAND_JOINTS else alpha
             out.append(
                 [
-                    round(old[0] + (cur[0] - old[0]) * alpha, 4),
-                    round(old[1] + (cur[1] - old[1]) * alpha, 4),
-                    round(old[2] + (cur[2] - old[2]) * alpha, 4),
+                    round(old[0] + (cur[0] - old[0]) * alpha_j, 4),
+                    round(old[1] + (cur[1] - old[1]) * alpha_j, 4),
+                    round(old[2] + (cur[2] - old[2]) * alpha_j, 4),
                     cur[3],
                 ]
             )

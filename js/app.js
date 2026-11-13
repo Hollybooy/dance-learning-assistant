@@ -699,12 +699,13 @@ function drawTeachOverlay() {
   const frame = poseAt(state.teachFrames, teachVideo.currentTime);
 
   if (frame?.pose) {
-    // 教学视角人物阴影（教学画布不镜像，掩码直接绘制）
+    // 教学人物阴影（教学画布不镜像，掩码直接绘制）
+    let teachMaskActive = null;
     if (state.shadows && state.video) {
       const maskBitmap = getTeachMask(state.video.id, frame.i);
       if (maskBitmap) lastTeachMask = maskBitmap;
-      const activeMask = maskBitmap || lastTeachMask;
-      if (activeMask) drawShadow(ctx, activeMask, rect, '#ffb020', 0.28);
+      teachMaskActive = maskBitmap || lastTeachMask;
+      if (teachMaskActive) drawShadow(ctx, teachMaskActive, rect, '#ffb020', 0.28);
       warmTeachMasks(state.video.id, frame.i);
     }
     if (state.skeleton) {
@@ -717,21 +718,97 @@ function drawTeachOverlay() {
       });
     }
 
-    if (state.skeleton && state.compare && state.livePose && cameraVideo.videoWidth) {
+    // 你的轮廓（绿）叠加到教学画面 + 重合百分比
+    if (state.livePose && cameraVideo.videoWidth) {
       const liveRect = { x: 0, y: 0, w: cameraVideo.videoWidth, h: cameraVideo.videoHeight };
-      // 摄像头为镜像显示：把你的骨架先翻转到正向视角，再映射到教学画面
-      const mapped = mapPose(flipX(state.livePose), liveRect, frame.pose, rect);
-      if (mapped) {
-        drawPose(ctx, mapped, rect, {
-          color: '#00e5a0',
-          lineWidth: 2,
-          dashed: true,
-          alpha: 0.55,
-          jointAlpha: 0.45,
-        });
+      // 摄像头为镜像显示：先翻转到正向视角，再映射到教学画面
+      const flippedLive = flipX(state.livePose);
+
+      // 你的人物阴影：翻转后按人体尺度映射到教学帧
+      let liveRectNorm = null;
+      if (state.shadows && state.liveMask) {
+        const liveShadowRect = mapShadowRect(flippedLive, liveRect, frame.pose, rect);
+        if (liveShadowRect) {
+          drawShadow(ctx, state.liveMask, liveShadowRect, '#00e5a0', 0.3, true);
+          liveRectNorm = {
+            x: (liveShadowRect.x - rect.x) / rect.w,
+            y: (liveShadowRect.y - rect.y) / rect.h,
+            w: liveShadowRect.w / rect.w,
+            h: liveShadowRect.h / rect.h,
+          };
+        }
+      }
+
+      updateOverlapBadge(teachMaskActive, state.liveMask, liveRectNorm);
+
+      if (state.skeleton && state.compare) {
+        const mapped = mapPose(flippedLive, liveRect, frame.pose, rect);
+        if (mapped) {
+          drawPose(ctx, mapped, rect, {
+            color: '#00e5a0',
+            lineWidth: 2,
+            dashed: true,
+            alpha: 0.55,
+            jointAlpha: 0.45,
+          });
+        }
       }
     }
   }
+}
+
+/* ------------------------------------------------- 轮廓重合度（IoU） */
+
+let overlapCanvasEl = null;
+let lastOverlapCheck = 0;
+
+/** 教学轮廓 vs 你的轮廓（映射到教学帧后）的交并比，节流更新到角标。 */
+function updateOverlapBadge(teachMask, liveMask, liveRectNorm) {
+  const badge = $('overlap-badge');
+  if (!badge) return;
+  const now = performance.now();
+  if (now - lastOverlapCheck < 120) return;
+  lastOverlapCheck = now;
+
+  if (!teachMask || !liveMask || !liveRectNorm) {
+    badge.hidden = true; // 双方轮廓齐了才显示，避免一直挂着 "--%"
+    return;
+  }
+  badge.hidden = false;
+
+  const size = 96;
+  if (!overlapCanvasEl) {
+    overlapCanvasEl = document.createElement('canvas');
+    overlapCanvasEl.width = size;
+    overlapCanvasEl.height = size;
+  }
+  const c = overlapCanvasEl.getContext('2d', { willReadFrequently: true });
+
+  // 教学掩码 alpha
+  c.clearRect(0, 0, size, size);
+  c.drawImage(teachMask, 0, 0, size, size);
+  const teachData = c.getImageData(0, 0, size, size).data;
+
+  // 你的掩码：水平翻转后放到教学帧坐标系中对应的人体区域
+  c.clearRect(0, 0, size, size);
+  const fx = 1 - liveRectNorm.x - liveRectNorm.w;
+  c.save();
+  c.translate((fx + liveRectNorm.w) * size, liveRectNorm.y * size);
+  c.scale(-1, 1);
+  c.drawImage(liveMask, 0, 0, liveRectNorm.w * size, liveRectNorm.h * size);
+  c.restore();
+  const liveData = c.getImageData(0, 0, size, size).data;
+
+  let inter = 0;
+  let union = 0;
+  for (let i = 3; i < teachData.length; i += 4) {
+    const a = teachData[i] > 128;
+    const b = liveData[i] > 128;
+    if (a || b) union += 1;
+    if (a && b) inter += 1;
+  }
+  const pct = union ? Math.round((inter / union) * 100) : 0;
+  badge.textContent = `重合 ${pct}%`;
 }
 
 function drawCameraOverlay() {
@@ -742,10 +819,7 @@ function drawCameraOverlay() {
   const rect = fitRect(width, height, cameraVideo.videoWidth, cameraVideo.videoHeight);
 
   if (state.livePose) {
-    // 自己的人物阴影（掩码即摄像头视角，与画布一起被 CSS 镜像）
-    if (state.shadows && state.liveMask) {
-      drawShadow(ctx, state.liveMask, rect, '#00e5a0', 0.35);
-    }
+    // 摄像头画面只显示骨架，不再绘制人物阴影（阴影集中在教学画布做对比）
     if (state.skeleton) {
       drawPose(ctx, state.livePose, rect, {
         color: '#00e5a0',
@@ -769,16 +843,6 @@ function drawCameraOverlay() {
         const flippedTeach = flipX(teaching.pose);
         const mapped = mapPose(flippedTeach, teachRect, state.livePose, rect);
         if (mapped) {
-          // 教学人物阴影：翻转后按人体尺度映射到你的画面
-          if (state.shadows && state.video) {
-            const maskBitmap = getTeachMask(state.video.id, teaching.i);
-            if (maskBitmap) lastTeachMask = maskBitmap;
-            const activeMask = maskBitmap || lastTeachMask;
-            if (activeMask) {
-              const shadowRect = mapShadowRect(flippedTeach, teachRect, state.livePose, rect);
-              if (shadowRect) drawShadow(ctx, activeMask, shadowRect, '#ff5c8a', 0.22, true);
-            }
-          }
           drawPose(ctx, mapped, rect, {
             color: '#ff5c8a',
             lineWidth: 2.5,

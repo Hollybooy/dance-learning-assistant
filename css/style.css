@@ -119,6 +119,23 @@ body {
 }
 .toggle input { accent-color: var(--accent); }
 
+/* 轮廓重合度角标（教学画布左上角） */
+.overlap-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 6;
+  background: rgba(10, 16, 22, .74);
+  border: 1px solid rgba(0, 229, 160, .55);
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: .5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
 /* 骨架/阴影显示开关 */
 .vis-btn {
   border: 1px solid #3a4552;
