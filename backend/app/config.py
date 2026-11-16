@@ -11,8 +11,8 @@ VIDEO_DIR = DATA_DIR / "videos"
 SESSION_DIR = DATA_DIR / "sessions"
 FRONTEND_DIR = PROJECT_DIR
 
-# 教学视频切片间隔（秒），与前端轮播图一致
-SEGMENT_SECONDS = float(os.getenv("DANCEMATE_SEGMENT_SECONDS", "10"))
+# 教学视频切片间隔（秒），与前端 js/catalog.js 的 SLICE_SECONDS 保持一致
+SEGMENT_SECONDS = float(os.getenv("DANCEMATE_SEGMENT_SECONDS", "7"))
 
 # 教学视频骨架采样帧率：15fps 足够逐帧对比，且离线分析速度可接受
 TEACH_SAMPLE_FPS = float(os.getenv("DANCEMATE_TEACH_FPS", "15"))

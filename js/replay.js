@@ -15,6 +15,7 @@ import {
   parseMaskBin,
   createMaskCache,
 } from './pose.js';
+import { mediaUrl } from './config.js';
 
 const PRELOAD_AHEAD = 36;
 
@@ -56,11 +57,13 @@ export class ReplayPlayer {
     this._tick = this._tick.bind(this);
 
     seekBar.addEventListener('input', () => {
-      if (!this.session) return;
+      if (seekBar.dataset.mode === 'video' || !this.session) return;
       const ratio = Number(seekBar.value) / 1000;
       this.seek(ratio * this.duration);
     });
-    playButton.addEventListener('click', () => this.toggle());
+    playButton.addEventListener('click', () => {
+      if (playButton.dataset.mode !== 'video') this.toggle();
+    });
   }
 
   async load(session) {
@@ -90,7 +93,7 @@ export class ReplayPlayer {
     // 录制侧掩码（可能不存在：老录制）
     if (session.masks_url) {
       try {
-        const res = await fetch(session.masks_url);
+        const res = await fetch(mediaUrl(session.masks_url));
         if (!res.ok) throw new Error('no masks');
         this.maskFrames = parseMaskBin(await res.arrayBuffer());
       } catch {
@@ -123,7 +126,9 @@ export class ReplayPlayer {
     if (!image) {
       image = new Image();
       image.decoding = 'async';
-      image.src = `/media/sessions/${this.session.id}/frames/${String(index).padStart(5, '0')}.jpg`;
+      image.src = mediaUrl(
+        `/media/sessions/${this.session.id}/frames/${String(index).padStart(5, '0')}.jpg`
+      );
       this.images.set(index, image);
     }
     return image;

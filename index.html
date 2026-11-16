@@ -1,183 +1,618 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DanceMate · 舞蹈学习助手</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f1512" />
+  <meta name="description" content="DANCE+ · 舞蹈学习助手：教学视频切片、摄像头实时骨架对比、练习录制与纠错回放。" />
+  <title>DANCE+ · 舞蹈学习助手</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="logo">💃 DanceMate</div>
-    <nav class="nav-tabs">
-      <button class="tab active" data-view="selecting">视频选择</button>
-      <button class="tab" data-view="learning">跟练学习</button>
-      <button class="tab" data-view="correct">纠错回放</button>
-    </nav>
-    <span class="badge" id="conn-badge">未连接</span>
+
+<!-- 图标精灵 -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M19.1 4.9l-1.7 1.7M6.6 17.4l-1.7 1.7"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.4s-7.5-4.6-7.5-9.6A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 7.5 3.2c0 5-7.5 9.6-7.5 9.6Z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.4"/><path d="m16 16 4.2 4.2"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l1 12.2h9L17.5 7"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4.5 16.5V19a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.9 9l5.6 2-5.6 2L12 18.5 10.1 13 4.5 11l5.6-2L12 3.5Z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m0 0-6-6m6 6-6 6"/></symbol>
+</svg>
+
+<!-- ======================= 封面 ======================= -->
+<section class="cover is-active" id="view-cover" data-view="cover">
+  <div class="cover__photo" role="img" aria-label="舞者在工作室中起舞"></div>
+  <div class="cover__veil"></div>
+  <div class="cover__texture" aria-hidden="true"></div>
+
+  <header class="cover__top">
+    <a class="brand brand--light" href="#/cover" aria-label="DANCE+ 封面">DANCE<span>+</span></a>
+    <button class="icon-btn icon-btn--ghost" id="cover-theme" type="button" aria-label="切换深色/浅色主题">
+      <svg><use href="#i-moon"/></svg>
+    </button>
   </header>
 
-  <!-- ================= 视频选择页 (selecting) ================= -->
-  <main id="view-selecting" class="view active">
-    <div class="selecting-layout">
-      <!-- 左侧：聊天历史记录框 -->
-      <aside class="chat-history">
-        <div class="panel-title">聊天历史记录</div>
-        <div class="chat-list" id="chat-list">
-          <div class="empty-hint">暂无学习会话，上传教学视频后自动创建</div>
-        </div>
-        <button class="btn ghost small" id="new-chat-btn">＋ 新建学习会话</button>
-      </aside>
+  <div class="cover__left">
+    <button class="cover__explore" id="enter-app" type="button">EXPLORE</button>
+    <p class="cover__date">Master Classes Starts<br /><b>10.31.2026</b></p>
+    <p class="cover__foot">New Dance Style company</p>
+  </div>
 
-      <section class="selecting-main">
-        <div class="pane-head">
-          <div class="pane-title">教学视频片段</div>
-          <span class="badge" id="video-status">未选择视频</span>
-        </div>
+  <div class="cover__right">
+    <h1 class="cover__headline">FEEL<br />THE RHYTHM</h1>
+    <p class="cover__sub">Let's Discover Dance Together!</p>
+    <div class="cover__bottom">
+      <div class="cover__thumbs" id="cover-thumbs">
+        <button class="thumb" type="button" data-goto="#/classes/ballet" aria-label="进入 Ballet 课程" title="Ballet">
+          <img src="assets/media/ballet-cover.jpg" alt="Ballet" loading="lazy" />
+        </button>
+        <button class="thumb" type="button" data-goto="#/classes/hiphop" aria-label="进入 Hip-Hop 课程" title="Hip-Hop">
+          <img src="assets/media/hiphop-cover.jpg" alt="Hip-Hop" loading="lazy" />
+        </button>
+        <button class="thumb" type="button" data-goto="#/classes/chinese" aria-label="进入 Chinese 课程" title="Chinese">
+          <img src="assets/media/chinese-cover.jpg" alt="Chinese" loading="lazy" />
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
 
-        <!-- 轮播图：将导入的视频按固定时间间隔切成片段 -->
-        <div class="carousel" id="select-carousel">
-          <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
-          <div class="carousel-track" id="select-carousel-track">
-            <div class="carousel-slide placeholder">
-              <span>导入视频后将按固定时间间隔切片</span>
+<!-- ======================= 应用外壳 ======================= -->
+<div class="shell" id="app-shell" hidden>
+  <button class="rail-scrim" id="rail-scrim" type="button" aria-label="收起导航" hidden></button>
+
+  <aside class="rail" id="rail">
+    <div class="rail__brand">
+      <a class="brand brand--ink" href="#/home">DANCE<span>+</span></a>
+      <button class="icon-btn icon-btn--quiet rail__close" id="rail-close" type="button" aria-label="收起导航">
+        <svg><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+    <nav class="rail__nav" aria-label="学习导航">
+      <section class="rail-item" data-rail-item="learning">
+        <button class="rail-item__head" type="button" data-rail-toggle aria-expanded="true">
+          <span>Learning</span><svg class="chev"><use href="#i-down"/></svg>
+        </button>
+        <div class="rail-item__body" id="rail-learning-list">
+          <p class="rail-empty">正在载入课程…</p>
+        </div>
+      </section>
+
+      <section class="rail-item" data-rail-item="history">
+        <button class="rail-item__head" type="button" data-rail-toggle aria-expanded="true">
+          <span>History</span><svg class="chev"><use href="#i-down"/></svg>
+        </button>
+        <div class="rail-item__body" id="rail-history-list">
+          <p class="rail-empty">暂无练习记录</p>
+        </div>
+      </section>
+
+      <section class="rail-item" data-rail-item="stars">
+        <button class="rail-item__head" type="button" data-rail-toggle aria-expanded="true">
+          <span>Stars</span><svg class="chev"><use href="#i-down"/></svg>
+        </button>
+        <div class="rail-item__body" id="rail-stars-list">
+          <p class="rail-empty">收藏的课程会出现在这里</p>
+        </div>
+      </section>
+    </nav>
+
+    <div class="rail__foot">
+      <button class="rail__profile" id="rail-profile" type="button" aria-label="进入个人主页">
+        <span class="avatar avatar--img" id="rail-avatar"><img id="rail-avatar-img" alt="" hidden /><span id="rail-avatar-initial">TU</span></span>
+        <span class="rail__who"><b id="rail-nickname">TUTU</b><small id="rail-state">离线</small></span>
+      </button>
+      <a class="icon-btn icon-btn--quiet" href="#/about" aria-label="关于我们"><svg><use href="#i-spark"/></svg></a>
+    </div>
+  </aside>
+
+  <div class="app">
+    <header class="topbar">
+      <button class="icon-btn icon-btn--quiet rail__open" id="rail-open" type="button" aria-label="展开导航">
+        <svg><use href="#i-menu"/></svg>
+      </button>
+      <nav class="topnav" aria-label="主导航">
+        <a href="#/home" data-nav="home">Home</a>
+        <a href="#/classes" data-nav="classes">Classes</a>
+        <a href="#/about" data-nav="about">About US</a>
+      </nav>
+      <div class="topbar__tools">
+        <button class="status-pill" id="conn-badge" type="button" title="实时链路状态">
+          <i class="dot"></i><span>未连接</span>
+        </button>
+        <button class="profile-chip" id="profile-chip" type="button" aria-label="个人主页" title="个人主页">
+          <img id="profile-chip-img" alt="" hidden />
+          <span id="profile-chip-initial">TU</span>
+        </button>
+        <button class="icon-btn icon-btn--quiet" id="theme-toggle" type="button" aria-label="切换深色/浅色主题">
+          <svg><use href="#i-moon"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="main" id="app-main">
+
+      <!-- ---------- 首页 ---------- -->
+      <section class="view" id="view-home" data-view="home">
+        <div class="page">
+          <header class="page__head">
+            <div>
+              <p class="eyebrow">YOUR DAILY PRACTICE</p>
+              <h2>Recommended for you</h2>
+              <p class="lede" id="home-sub">从教学视频库开始今天的练习</p>
+            </div>
+            <button class="btn btn--soft" id="home-refresh" type="button">刷新视频库</button>
+          </header>
+
+          <div class="carousel" id="home-carousel">
+            <button class="carousel__arrow" type="button" data-dir="-1" aria-label="向左浏览">
+              <svg><use href="#i-left"/></svg>
+            </button>
+            <div class="carousel__track" id="home-carousel-track">
+              <div class="card-skeleton"></div>
+              <div class="card-skeleton"></div>
+              <div class="card-skeleton"></div>
+            </div>
+            <button class="carousel__arrow" type="button" data-dir="1" aria-label="向右浏览">
+              <svg><use href="#i-right"/></svg>
+            </button>
+          </div>
+
+          <button class="upload-card" id="home-upload-btn" type="button">
+            <span class="upload-card__icon"><svg><use href="#i-plus"/></svg></span>
+            <span class="upload-card__text">
+              <b>ADD A VIDEO</b>
+              <small>上传本地教学视频，自动切片并提取骨架</small>
+            </span>
+            <svg class="upload-card__arrow"><use href="#i-arrow"/></svg>
+          </button>
+
+          <div class="home-bottom">
+            <form class="search-pill" id="search-form" role="search">
+              <span class="search-pill__icon"><svg><use href="#i-mic"/></svg></span>
+              <input id="search-input" type="search" autocomplete="off" placeholder="搜索教学视频、课程或风格…" aria-label="搜索教学视频" />
+              <button class="search-pill__go" type="submit">搜索</button>
+            </form>
+            <button class="upload-square" id="upload-square" type="button" aria-label="上传教学视频">
+              <svg><use href="#i-upload"/></svg>
+            </button>
+          </div>
+          <div class="search-results" id="search-results"></div>
+          <p class="status-line" id="library-status">正在连接后端…</p>
+        </div>
+      </section>
+
+      <!-- ---------- 课程大厅 ---------- -->
+      <section class="view" id="view-classes" data-view="classes">
+        <div class="classes">
+          <aside class="cat-rail">
+            <h3>Categories</h3>
+            <div class="cat-list" id="category-list" role="list"></div>
+          </aside>
+
+          <div class="classes__stage">
+            <img class="classes__bg" id="classes-bg" alt=""
+              src="assets/media/hero-01-classes-studio.jpg"
+              loading="lazy" />
+            <div class="classes__wash" aria-hidden="true"></div>
+            <div class="classes__hint">
+              <p class="eyebrow">TODAY&rsquo;S STUDIO</p>
+              <h2 id="classes-title">选中一个课程开始跟练</h2>
+              <p id="classes-sub">左侧选择风格分类，右侧挑选你的教学视频。</p>
+            </div>
+
+            <div class="arc" id="class-arc" hidden>
+              <button class="arc__nav arc__nav--prev" type="button" data-arc-dir="-1" aria-label="上一个精选课程">
+                <svg><use href="#i-left"/></svg>
+              </button>
+              <div class="arc__stage" id="arc-stage"></div>
+              <button class="arc__nav arc__nav--next" type="button" data-arc-dir="1" aria-label="下一个精选课程">
+                <svg><use href="#i-right"/></svg>
+              </button>
+              <div class="arc__footer">
+                <div class="arc__dots" id="arc-dots"></div>
+                <span class="arc__counter" id="arc-counter">01 / 07</span>
+              </div>
+            </div>
+
+            <div class="class-rail" id="class-rail">
+              <header class="class-rail__head">
+                <h3>视频库</h3>
+                <span id="class-count">0</span>
+              </header>
+              <div class="class-rail__list" id="class-albums"></div>
+              <button class="album-add" id="class-upload-btn" type="button">
+                <svg><use href="#i-plus"/></svg> 上传教学视频
+              </button>
+            </div>
+
+            <div class="search-pill search-pill--flat classes__search">
+              <span class="search-pill__icon"><svg><use href="#i-mic"/></svg></span>
+              <input id="search-input-2" type="search" autocomplete="off" placeholder="搜索课程…" aria-label="搜索课程" />
             </div>
           </div>
-          <button class="carousel-arrow right" aria-label="下一个">&#10095;</button>
-        </div>
-
-        <div class="search-row">
-          <input type="text" id="search-input" class="search-input" placeholder="在此处搜索教学视频…" />
-          <button class="btn primary" id="search-btn">搜索</button>
-          <label class="btn upload-btn">
-            手动上传<br />视频文件
-            <input type="file" id="upload-input" accept="video/*" hidden />
-          </label>
-        </div>
-        <div class="search-results" id="search-results"></div>
-        <div class="status-line" id="library-status">正在连接后端…</div>
-      </section>
-    </div>
-  </main>
-
-  <!-- ================= 跟练学习页 (learning) ================= -->
-  <main id="view-learning" class="view">
-    <div class="learning-layout">
-      <section class="pane">
-        <div class="pane-head">
-          <div class="pane-title">教学视频的当前片段</div>
-          <span class="badge" id="teach-badge">--</span>
-        </div>
-        <div class="video-wrap">
-          <video id="teach-video" class="video-frame" playsinline></video>
-          <canvas id="teach-overlay" class="overlay-canvas"></canvas>
-          <div class="overlap-badge" id="overlap-badge" hidden>重合 --%</div>
-        </div>
-        <div class="seg-progress-row">
-          <div class="seg-progress" id="teach-progress">
-            <div class="seg-progress-fill" id="teach-progress-fill"></div>
-          </div>
-          <span class="seg-time" id="seg-time">0:00 / 0:10</span>
-        </div>
-        <div class="seg-controls">
-          <button class="switch-btn left" id="prev-seg" aria-label="向左切换上一个片段">&#10094; 上一片段</button>
-          <button class="switch-btn" id="teach-play-toggle">⏸ 暂停</button>
-          <label class="speed-box">倍速
-            <select class="mini-select" id="speed-select" title="教学视频播放速度">
-              <option value="0.2">0.2x</option>
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1.0x</option>
-              <option value="2">2.0x</option>
-            </select>
-          </label>
-          <span class="seg-indicator" id="seg-indicator">-- / --</span>
-          <button class="switch-btn right" id="next-seg" aria-label="向右切换下一个片段">下一片段 &#10095;</button>
         </div>
       </section>
 
-      <section class="pane">
-        <div class="pane-head">
-          <div class="pane-title">摄像头捕捉的实时画面</div>
-          <div class="pane-tools">
-            <span class="badge" id="latency-badge">未开启</span>
-            <label class="speed-box">倒计时
-              <select class="mini-select" id="countdown-select" title="开始录制前的准备倒计时">
-                <option value="0">不等待</option>
-                <option value="3" selected>3 秒</option>
-                <option value="5">5 秒</option>
-                <option value="10">10 秒</option>
-              </select>
-            </label>
-            <button class="btn record small" id="record-btn">● 开始录制</button>
+      <!-- ---------- 课程详情 ---------- -->
+      <section class="view" id="view-class" data-view="class">
+        <div class="detail">
+          <div class="detail__cover" id="detail-cover">
+            <img id="detail-cover-img" alt="" />
+            <span class="detail__badge" id="detail-badge">教学视频</span>
+            <span class="detail__cap" id="detail-meta">--</span>
           </div>
-        </div>
-        <div class="video-wrap">
-          <video id="camera-video" class="video-frame mirrored" autoplay muted playsinline></video>
-          <canvas id="camera-overlay" class="overlay-canvas mirrored"></canvas>
-          <div class="countdown-overlay" id="countdown-overlay" hidden>
-            <span id="countdown-num">3</span>
+
+          <div class="detail__panel">
+            <p class="eyebrow">CLASS INTRO</p>
+            <h2>介绍</h2>
+            <h3 id="detail-title">尚未选择课程</h3>
+            <p class="detail__desc" id="detail-desc">从课程大厅挑选一个教学视频，即可查看课程时长、片段划分与骨架分析状态。</p>
+            <ul class="detail__facts" id="detail-facts"></ul>
           </div>
-          <div class="cam-error" id="cam-error" hidden>
-            <div class="cam-error-title" id="cam-error-title">摄像头不可用</div>
-            <div class="cam-error-hint" id="cam-error-hint"></div>
-            <button class="btn small primary" id="cam-retry">重试连接</button>
-          </div>
-        </div>
-        <div class="seg-controls">
-          <label class="toggle"><input type="checkbox" id="compare-toggle" checked /> 显示教学对比轮廓</label>
-          <div class="pane-tools">
-            <button class="vis-btn active" id="skeleton-toggle" type="button">隐藏骨架</button>
-            <button class="vis-btn active" id="shadow-toggle" type="button">隐藏阴影</button>
-            <button class="switch-btn right" id="next-seg-2">下一片段 &#10095;</button>
+
+          <div class="detail__actions">
+            <button class="btn btn--ghost" id="detail-back" type="button">Back</button>
+            <button class="btn btn--primary" id="detail-start" type="button">Start now</button>
           </div>
         </div>
       </section>
-    </div>
 
-    <div class="carousel bottom" id="learn-carousel">
-      <button class="carousel-arrow left" aria-label="上一个">&#10094;</button>
-      <div class="carousel-track" id="learn-carousel-track">
-        <div class="carousel-slide placeholder"><span>暂无片段</span></div>
-      </div>
-      <button class="carousel-arrow right" aria-label="下一个">&#10095;</button>
-    </div>
-  </main>
+      <!-- ---------- 跟练学习 ---------- -->
+      <section class="view view--stage" id="view-learning" data-view="learning">
+        <div class="stage" id="learn-stage">
+          <div class="stage__media" id="learn-media">
+            <div class="stage__pane stage__pane--teach">
+              <video id="teach-video" class="teach-video" playsinline preload="metadata"></video>
+              <canvas id="teach-overlay" class="teach-overlay"></canvas>
+              <div class="overlap-badge" id="overlap-badge" hidden>重合 --%</div>
 
-  <!-- ================= 纠错回放页 (error correct) ================= -->
-  <main id="view-correct" class="view">
-    <div class="correct-layout">
-      <aside class="clip-list">
-        <div class="pane-head">
-          <div class="pane-title">练习回放</div>
-          <button class="btn ghost small" id="refresh-sessions">刷新</button>
-        </div>
-        <div class="clip-items" id="session-list">
-          <div class="empty-hint">暂无录制，去「跟练学习」页录制一段吧</div>
-        </div>
-        <div class="clip-nav">
-          <button class="switch-btn small" id="prev-clip">&#10094; 上一个</button>
-          <button class="switch-btn small" id="next-clip">下一个 &#10095;</button>
-        </div>
-      </aside>
+              <div class="stage__top">
+                <button class="glass-btn" id="learn-back" type="button" aria-label="返回">
+                  <svg><use href="#i-left"/></svg>
+                </button>
+                <div class="stage__title">
+                  <b id="stage-title">教学片段</b>
+                  <small id="teach-badge">--</small>
+                </div>
+                <span class="latency" id="latency-badge">未开启</span>
+              </div>
 
-      <section class="pane wide">
-        <div class="pane-head">
-          <div class="pane-title">摄像头捕捉的画面回放</div>
-          <span class="badge" id="replay-status">未选择回放</span>
-        </div>
-        <div class="replay-wrap">
-          <canvas id="replay-canvas"></canvas>
-        </div>
-        <div class="replay-controls">
-          <button class="btn primary small" id="replay-toggle">播放</button>
-          <input type="range" id="replay-seek" min="0" max="1000" value="0" step="1" />
-          <span class="time" id="replay-time">00:00 / 00:00</span>
-          <label class="toggle"><input type="checkbox" id="replay-compare" checked /> 教学轮廓</label>
+              <button class="stage__arrow stage__arrow--left" id="prev-seg" type="button" aria-label="上一片段">
+                <svg><use href="#i-left"/></svg>
+              </button>
+              <button class="stage__arrow stage__arrow--right" id="next-seg" type="button" aria-label="下一片段">
+                <svg><use href="#i-right"/></svg>
+              </button>
+
+              <button class="heart-btn" id="favorite-btn" type="button" aria-label="收藏课程" aria-pressed="false">
+                <svg><use href="#i-heart"/></svg>
+              </button>
+
+              <!-- 竖版灵动岛：教学骨架 / 全屏摄像头叠加 -->
+              <div class="island" id="overlay-island" role="group" aria-label="骨骼叠加控制">
+                <button class="island__btn is-on" id="island-teach" type="button" aria-label="教学骨架" aria-pressed="true">
+                  <svg><use href="#i-spark"/></svg>
+                </button>
+                <button class="island__btn" id="island-merge" type="button" aria-label="切换全屏摄像头叠加模式" aria-pressed="false">
+                  <svg><use href="#i-plus"/></svg><em>FULL</em>
+                </button>
+              </div>
+            </div>
+
+            <div class="stage__pane stage__pane--cam">
+              <aside class="cam-card" id="cam-card">
+                <video id="camera-video" class="cam-video mirrored" autoplay muted playsinline></video>
+                <canvas id="camera-overlay" class="cam-overlay mirrored"></canvas>
+                <span class="cam-tag">YOU</span>
+                <div class="countdown" id="countdown-overlay" hidden><span id="countdown-num">3</span></div>
+                <div class="cam-error" id="cam-error" hidden>
+                  <b id="cam-error-title">摄像头不可用</b>
+                  <p id="cam-error-hint"></p>
+                  <button class="btn btn--sm btn--primary" id="cam-retry" type="button">重试连接</button>
+                </div>
+              </aside>
+            </div>
+          </div>
+
+          <!-- 操作框属于整个舞台，而非左侧教学窗格 -->
+          <div class="stage__dock" id="stage-dock">
+            <div class="timeline" id="teach-progress" role="slider" tabindex="0"
+                 aria-label="当前片段进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="timeline__fill" id="teach-progress-fill"></div>
+              <span class="timeline__dot" id="teach-progress-dot"></span>
+            </div>
+
+            <div class="dock-row">
+              <button class="circle-btn" id="teach-play-toggle" type="button" aria-label="播放或暂停">❚❚</button>
+              <span class="dock-time" id="seg-time">00:00 / 00:07</span>
+              <span class="dock-seg" id="seg-indicator">-- / --</span>
+
+              <label class="dock-field">倍速
+                <select class="mini-select" id="speed-select" title="教学视频播放速度">
+                  <option value="0.75">0.75x</option>
+                  <option value="0.9">0.9x</option>
+                  <option value="1" selected>1.0x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                </select>
+              </label>
+
+              <button class="chip is-on" id="skeleton-toggle" type="button">骨架</button>
+              <button class="chip is-on" id="shadow-toggle" type="button">阴影</button>
+              <label class="chip-check"><input type="checkbox" id="compare-toggle" checked /><span>对比轮廓</span></label>
+
+              <label class="dock-field">倒计时
+                <select class="mini-select" id="countdown-select" title="开始录制前的准备时间">
+                  <option value="0">不等待</option>
+                  <option value="3" selected>3 秒</option>
+                  <option value="5">5 秒</option>
+                  <option value="10">10 秒</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="filmstrip" id="learn-carousel">
+              <button class="filmstrip__nav" type="button" data-dir="-1" aria-label="向左">
+                <svg><use href="#i-left"/></svg>
+              </button>
+              <div class="filmstrip__track" id="learn-carousel-track">
+                <p class="film-empty">暂无片段</p>
+              </div>
+              <button class="filmstrip__nav" type="button" data-dir="1" aria-label="向右">
+                <svg><use href="#i-right"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <button class="record-btn record-fab" id="record-btn" type="button">
+            <i></i><span>开始录制</span>
+          </button>
         </div>
       </section>
-    </div>
-  </main>
 
-  <script type="module" src="js/app.js"></script>
+      <!-- ---------- 历史记录 ---------- -->
+      <section class="view" id="view-history" data-view="history">
+        <div class="page">
+          <header class="page__head">
+            <div>
+              <p class="eyebrow">YOUR PROGRESS</p>
+              <h2>History</h2>
+              <p class="lede">每一次录制都保存为可回放的练习记录，红色段落是需要纠正的动作。</p>
+            </div>
+            <button class="btn btn--soft" id="refresh-sessions" type="button">刷新记录</button>
+          </header>
+
+          <div class="history-grid">
+            <section class="panel">
+              <header class="panel__head">
+                <h3>练习回放</h3><span class="pill" id="history-count">0</span>
+              </header>
+              <div class="history-list" id="history-list">
+                <p class="empty-hint">暂无录制，去「跟练学习」页录制一段吧</p>
+              </div>
+            </section>
+
+            <section class="panel">
+              <header class="panel__head">
+                <h3>学习进度</h3><span class="pill">Stars</span>
+              </header>
+              <div class="history-list" id="stars-list">
+                <p class="empty-hint">还没有课程，先去上传一个教学视频</p>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 关于我们 ---------- -->
+      <section class="view" id="view-about" data-view="about">
+        <div class="page">
+          <header class="page__head">
+            <div>
+              <p class="eyebrow">ABOUT DANCE+</p>
+              <h2>About US</h2>
+              <p class="lede">把舞蹈教学视频变成可以逐帧对照的私人教练。</p>
+            </div>
+          </header>
+
+          <div class="about-grid">
+            <figure class="about-card about-card--wide">
+              <img alt="用手机录制舞蹈练习" loading="lazy"
+                src="assets/media/hero-02-recording-tripod.jpg" />
+              <figcaption><b>一块屏幕，两种视角</b><span>教学视频与你的摄像头画面实时同屏，动作差异一眼可见。</span></figcaption>
+            </figure>
+            <figure class="about-card">
+              <img alt="骨骼姿态分析可视化" loading="lazy"
+                src="assets/media/hero-03-neon-pose.jpg" />
+              <figcaption><b>33 个关键点</b><span>MediaPipe 实时推理，骨架与人物剪影同时叠加。</span></figcaption>
+            </figure>
+            <figure class="about-card">
+              <img alt="一起跳舞的年轻人" loading="lazy"
+                src="assets/media/hero-04-group-dance.jpg" />
+              <figcaption><b>为学习者设计</b><span>7 秒切片、五档倍速、全部片段自动循环，跟得上才算学会。</span></figcaption>
+            </figure>
+            <figure class="about-card about-card--wide">
+              <img alt="动作分析界面" loading="lazy"
+                src="assets/media/hero-05-analysis-dashboard.jpg" />
+              <figcaption><b>录下来，再纠正</b><span>练习过程自动录制，回放时把教学轮廓映射到你的身上。</span></figcaption>
+            </figure>
+          </div>
+
+          <div class="contact-bar" id="contact">
+            <div>
+              <p class="eyebrow">CONTACT US</p>
+              <h3>一起把动作练对</h3>
+              <p>课程合作、功能建议或问题反馈，欢迎随时联系。</p>
+            </div>
+            <div class="contact-bar__actions">
+              <a class="btn btn--primary" href="mailto:hello@danceplus.studio">hello@danceplus.studio</a>
+              <a class="btn btn--ghost" href="https://github.com/Hollybooy/dance-learning-assistant" target="_blank" rel="noreferrer">GitHub 仓库</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 个人主页 ---------- -->
+      <section class="view" id="view-profile" data-view="profile">
+        <div class="page profile">
+          <header class="profile__hero">
+            <button class="profile__avatar" id="profile-avatar-btn" type="button" aria-label="更换头像">
+              <img id="profile-avatar-img" alt="" hidden />
+              <span id="profile-avatar-initial">TU</span>
+              <i>更换</i>
+            </button>
+            <div class="profile__id">
+              <p class="eyebrow">DANCER PROFILE</p>
+              <h2><span id="profile-name">TUTU</span>
+                <button class="link-btn" id="profile-edit" type="button">编辑资料</button>
+              </h2>
+              <p id="profile-bio">今天也要把动作练对。</p>
+            </div>
+            <button class="btn btn--soft" id="profile-auth" type="button">登录</button>
+          </header>
+
+          <div class="profile__stats" id="profile-stats"></div>
+
+          <div class="profile__grid">
+            <section class="panel profile__panel">
+              <header class="panel__head">
+                <h3>学习记录</h3>
+                <a class="link-btn" href="#/history">全部记录</a>
+              </header>
+              <div class="profile__history" id="profile-history">
+                <p class="empty-hint">暂无练习记录</p>
+              </div>
+            </section>
+
+            <section class="panel profile__panel">
+              <header class="panel__head">
+                <h3>好友</h3>
+                <span class="pill" id="friend-count">0</span>
+              </header>
+              <form class="friend-form" id="friend-form">
+                <input id="friend-input" type="text" maxlength="16" autocomplete="off" placeholder="输入好友昵称添加…" aria-label="好友昵称" />
+                <button class="btn btn--sm btn--primary" type="submit">添加</button>
+              </form>
+              <div class="friend-list" id="friend-list">
+                <p class="empty-hint">还没有好友，先添加一位舞伴吧</p>
+              </div>
+            </section>
+
+            <section class="panel profile__panel">
+              <header class="panel__head">
+                <h3>系统设置</h3>
+                <span class="pill">Settings</span>
+              </header>
+              <div class="settings-list" id="settings-list"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- 纠错回放 ---------- -->
+      <section class="view view--stage" id="view-correct" data-view="correct">
+        <div class="replay">
+          <div class="replay__side">
+            <button class="replay-thumb" id="clip-prev" type="button">
+              <img id="clip-prev-img" alt="" />
+              <span>上一条</span>
+            </button>
+            <button class="replay-thumb" id="clip-next" type="button">
+              <img id="clip-next-img" alt="" />
+              <span>下一条</span>
+            </button>
+          </div>
+
+          <div class="replay__main">
+            <div class="replay__top">
+              <button class="glass-btn" id="correct-back" type="button" aria-label="返回">
+                <svg><use href="#i-left"/></svg>
+              </button>
+              <span class="replay-status" id="replay-status">未选择回放</span>
+            </div>
+            <video id="replay-video" class="replay-video" playsinline preload="metadata" hidden></video>
+            <canvas id="replay-canvas"></canvas>
+            <button class="heart-btn heart-btn--canvas" id="replay-fav" type="button" aria-label="收藏回放" aria-pressed="false">
+              <svg><use href="#i-heart"/></svg>
+            </button>
+          </div>
+
+          <div class="replay__dock">
+            <div class="error-ribbon" id="error-ribbon" aria-label="动作跟随度"></div>
+            <div class="error-legend">
+              <span><i class="ok"></i>跟随良好</span>
+              <span><i class="bad"></i>需要纠正</span>
+              <b id="match-score">--</b>
+            </div>
+
+            <div class="dock-row">
+              <button class="circle-btn" id="replay-toggle" type="button" aria-label="播放或暂停">播放</button>
+              <input class="seek" type="range" id="replay-seek" min="0" max="1000" value="0" step="1" aria-label="回放进度" />
+              <span class="dock-time" id="replay-time">00:00 / 00:00</span>
+              <label class="chip-check"><input type="checkbox" id="replay-compare" checked /><span>教学轮廓</span></label>
+            </div>
+
+            <div class="filmstrip" id="correct-carousel">
+              <button class="filmstrip__nav" type="button" data-dir="-1" aria-label="向左">
+                <svg><use href="#i-left"/></svg>
+              </button>
+              <div class="filmstrip__track" id="correct-filmstrip"></div>
+              <button class="filmstrip__nav" type="button" data-dir="1" aria-label="向右">
+                <svg><use href="#i-right"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<input type="file" id="upload-input" accept="video/*" hidden />
+<input type="file" id="avatar-input" accept="image/*" hidden />
+
+<!-- 资料编辑 / 登录弹窗 -->
+<dialog class="modal" id="profile-modal">
+  <form class="modal__panel" id="profile-form">
+    <h3 id="profile-modal-title">编辑资料</h3>
+    <p class="modal__hint" id="profile-modal-hint">昵称与头像仅保存在本机浏览器。</p>
+    <label class="field"><span>昵称</span>
+      <input id="profile-name-input" type="text" maxlength="16" autocomplete="off" placeholder="给自己起个名字" />
+    </label>
+    <label class="field"><span>一句话简介</span>
+      <input id="profile-bio-input" type="text" maxlength="40" autocomplete="off" placeholder="今天也要把动作练对。" />
+    </label>
+    <div class="modal__actions">
+      <button class="btn btn--ghost" type="button" id="profile-cancel">取消</button>
+      <button class="btn btn--primary" type="submit" id="profile-save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 分析 / 上传状态浮层 -->
+<div class="loader" id="loader" hidden>
+  <div class="loader__panel">
+    <div class="loader__rings" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <p class="loader__text" id="loader-text">正在分析教学视频…</p>
+    <div class="loader__bar"><div class="loader__fill" id="loader-fill"></div></div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

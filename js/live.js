@@ -7,6 +7,8 @@
  *  - 骨架绘制留在前端，服务端只回 33 个关键点。
  */
 
+import { wsUrl } from './config.js';
+
 const CAPTURE_WIDTH = 640;
 const CAPTURE_HEIGHT = 480;
 const JPEG_QUALITY = 0.6;
@@ -136,8 +138,7 @@ export class LivePoseStream {
   }
 
   _connect() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws/practice`);
+    const ws = new WebSocket(wsUrl('/ws/practice'));
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
 
