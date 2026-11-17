@@ -1059,6 +1059,45 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   pointer-events: none;
 }
 
+/* 小教练提示：按部位给出方向性建议，出现在教学画面底部中间 */
+.coach-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translate(-50%, 8px);
+  z-index: 7;
+  max-width: min(78%, 420px);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(10, 26, 19, 0.82);
+  border: 1px solid rgba(124, 240, 176, 0.55);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(14px);
+  color: #eafff4;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease, transform .22s ease;
+}
+.coach-tip.is-show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.coach-tip::before {
+  content: '小教练';
+  display: inline-block;
+  margin-right: 7px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(124, 240, 176, 0.18);
+  color: #7cf0b0;
+  font-size: 10px;
+  letter-spacing: .06em;
+  vertical-align: 1px;
+}
+
 .stage__arrow {
   position: absolute;
   top: 46%;

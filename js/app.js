@@ -834,6 +834,8 @@ async function selectVideo(meta) {
   teachVideo.playbackRate = state.speed;
 
   $('stage-title').textContent = meta.title;
+  hideCoachTip(); // 换课程后旧提示不再适用
+  regionTipAt.clear();
   setTeachBadge(meta.local ? '本地素材 · 无骨架数据' : '骨架等待中');
   renderFilmstrip();
   renderDetail();
@@ -1483,7 +1485,7 @@ function drawTeachOverlay() {
         };
       }
     }
-    updateOverlapBadge(teachMaskActive, state.liveMask, liveRectNorm);
+    updateOverlapBadge(teachMaskActive, state.liveMask, liveRectNorm, frame.pose);
 
     if (state.skeleton && state.compare) {
       const mapped = mapPose(flippedLive, liveRect, frame.pose, rect);
@@ -1508,7 +1510,7 @@ let overlapCanvasEl = null;
 let lastOverlapCheck = 0;
 
 /** 教学轮廓 vs 你的轮廓（映射到教学帧后）的交并比，节流更新到角标。 */
-function updateOverlapBadge(teachMask, liveMask, liveRectNorm) {
+function updateOverlapBadge(teachMask, liveMask, liveRectNorm, teachPose) {
   const badge = $('overlap-badge');
   if (!badge) return;
   const now = performance.now();
@@ -1517,6 +1519,7 @@ function updateOverlapBadge(teachMask, liveMask, liveRectNorm) {
 
   if (!teachMask || !liveMask || !liveRectNorm) {
     badge.hidden = true; // 双方轮廓齐了才显示，避免一直挂着 "--%"
+    hideCoachTip();
     return;
   }
   badge.hidden = false;
@@ -1554,6 +1557,202 @@ function updateOverlapBadge(teachMask, liveMask, liveRectNorm) {
   }
   const pct = union ? Math.round((inter / union) * 100) : 0;
   badge.textContent = `重合 ${pct}%`;
+  maybeCoachTip(analyzeRegions(teachData, liveData, size, teachPose));
+}
+
+/* ------------------------------------------------- 部位提示（小教练） */
+
+// 部位划分：以教学骨架关节点为中心，半径按肩宽缩放，覆盖该肢体的轮廓
+const TIP_REGIONS = [
+  { key: 'head', name: '头', joints: [0], scale: 1.0 },
+  { key: 'larm', name: '左手', joints: [13, 15], scale: 1.25 },
+  { key: 'rarm', name: '右手', joints: [14, 16], scale: 1.25 },
+  { key: 'hip', name: '腰部', joints: [23, 24], scale: 1.15 },
+  { key: 'lleg', name: '左腿', joints: [25, 27], scale: 1.25 },
+  { key: 'rleg', name: '右腿', joints: [26, 28], scale: 1.25 },
+];
+const TIP_MIN_PIXELS = 10; // 区域内像素太少不评估（掩码只有 96×96，避免噪声）
+const TIP_MIN_COVER = 0.62; // 你的轮廓覆盖率低于此值才提示
+const TIP_COOLDOWN_MS = 5000; // 同一部位提示冷却
+const TIP_SHOW_MS = 3400;
+const PRAISE_INTERVAL_MS = 12000;
+const OFFSET_THRESHOLD = 0.16; // 质心偏移阈值（以肩宽为单位）
+const regionTipAt = new Map();
+let tipHideTimer = 0;
+let lastPraiseAt = 0;
+
+/**
+ * 分部位统计「教学轮廓 / 你的轮廓」的覆盖与质心偏移。
+ * 返回每部位的覆盖率、面积比、质心差（单位：肩宽）。
+ */
+function analyzeRegions(teachData, liveData, size, teachPose) {
+  if (!teachPose) return [];
+  const vis = (p) => p && (p[3] ?? 1) > 0.3;
+  let span = 0.16;
+  if (vis(teachPose[11]) && vis(teachPose[12])) {
+    span =
+      Math.hypot(teachPose[11][0] - teachPose[12][0], teachPose[11][1] - teachPose[12][1]) ||
+      0.16;
+  }
+
+  const centers = TIP_REGIONS.map((region) => {
+    const pts = region.joints.map((j) => teachPose[j]).filter(vis);
+    if (!pts.length) return null;
+    const x = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    const y = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const r = span * region.scale * size;
+    return { x: x * size, y: y * size, r2: r * r };
+  });
+
+  const stats = TIP_REGIONS.map(() => ({ a: 0, b: 0, i: 0, ax: 0, ay: 0, bx: 0, by: 0 }));
+
+  for (let py = 0; py < size; py += 1) {
+    for (let px = 0; px < size; px += 1) {
+      const alphaIndex = (py * size + px) * 4 + 3;
+      const inTeach = teachData[alphaIndex] > 128;
+      const inLive = liveData[alphaIndex] > 128;
+      if (!inTeach && !inLive) continue;
+
+      let best = -1;
+      let bestDist = Infinity;
+      for (let k = 0; k < centers.length; k += 1) {
+        const c = centers[k];
+        if (!c) continue;
+        const dx = px + 0.5 - c.x;
+        const dy = py + 0.5 - c.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < c.r2 && d2 < bestDist) {
+          bestDist = d2;
+          best = k;
+        }
+      }
+      if (best < 0) continue;
+
+      const s = stats[best];
+      if (inTeach) {
+        s.a += 1;
+        s.ax += px;
+        s.ay += py;
+      }
+      if (inLive) {
+        s.b += 1;
+        s.bx += px;
+        s.by += py;
+      }
+      if (inTeach && inLive) s.i += 1;
+    }
+  }
+
+  return TIP_REGIONS.map((region, k) => {
+    const s = stats[k];
+    if (!s.a || !s.b) return { region, a: s.a, b: s.b, cover: 0, dx: 0, dy: 0 };
+    return {
+      region,
+      a: s.a,
+      b: s.b,
+      cover: s.i / s.a,
+      // 质心差：+dy 表示你的部位比阴影更靠下，dx>0 表示更靠画面右侧
+      dx: (s.bx / s.b - s.ax / s.a) / (span * size),
+      dy: (s.by / s.b - s.ay / s.a) / (span * size),
+    };
+  });
+}
+
+/** 按部位 + 偏移方向生成提示文案（鼓励语气，先肯定再给动作）。 */
+function tipTextFor(entry) {
+  const { region, cover, dx, dy, a, b } = entry;
+  const name = region.name;
+  const low = dy > OFFSET_THRESHOLD;
+  const high = dy < -OFFSET_THRESHOLD;
+  const side = Math.abs(dx) > OFFSET_THRESHOLD ? (dx > 0 ? '往左' : '往右') : '';
+  const tooBig = b > a * 1.6;
+
+  if (region.key === 'head') {
+    if (low) return '头再抬起来一点，视线跟上老师就更好啦';
+    if (high) return '头稍微收一点，和老师的轮廓对齐';
+    if (side) return `头再${side}靠一点，马上就重合了`;
+    return '头的位置很贴近了，保持住';
+  }
+
+  if (region.key === 'hip') {
+    if (low) return '腰部再提一点，重心跟上老师';
+    if (high) return '腰稍微沉一点，和老师的姿势对齐';
+    if (side) return `腰再${side}带一点，轮廓就贴合了`;
+    if (tooBig) return '腰部幅度收一点，别超过阴影';
+    return '腰腹位置很稳，继续保持';
+  }
+
+  if (region.key.endsWith('leg')) {
+    if (low) return `${name}再抬起来一些，幅度跟上老师`;
+    if (high) return `${name}稍微收一点，注意和老师对齐`;
+    if (side) return `${name}再${side}带一点，轮廓就重合了`;
+    if (tooBig) return `${name}幅度收一点，别超出阴影`;
+    if (cover < 0.4) return `${name}再展开一点，跟住老师的幅度`;
+    return `${name}再稍微抬高一点点就贴合了`;
+  }
+
+  // 手臂（用户反馈最容易出现"低于阴影"的部位）
+  if (low) return `${name}再抬高一点点，就快贴合了！`;
+  if (high) return `${name}稍微放低一点，和老师的轮廓对齐`;
+  if (side) return `${name}再${side}带一点，轮廓就越贴越近了`;
+  if (tooBig) return `${name}幅度收一点，别超出阴影`;
+  if (cover < 0.4) return `${name}再伸展开一些，跟上老师的幅度`;
+  return `${name}再抬高一点点就贴合了`;
+}
+
+function showCoachTip(text) {
+  const tip = $('coach-tip');
+  if (!tip) return;
+  tip.textContent = text;
+  tip.hidden = false;
+  // 强制回流，保证 hidden 移除后过渡动画生效
+  void tip.offsetWidth;
+  tip.classList.add('is-show');
+  clearTimeout(tipHideTimer);
+  tipHideTimer = setTimeout(() => {
+    tip.classList.remove('is-show');
+    setTimeout(() => {
+      if (!tip.classList.contains('is-show')) tip.hidden = true;
+    }, 260);
+  }, TIP_SHOW_MS);
+}
+
+function hideCoachTip() {
+  const tip = $('coach-tip');
+  if (!tip) return;
+  clearTimeout(tipHideTimer);
+  tip.classList.remove('is-show');
+  tip.hidden = true;
+}
+
+// 调试钩子：便于自动化验证部位判定与文案方向（不参与业务逻辑）
+window.__coachTest = { analyzeRegions, tipTextFor, TIP_REGIONS };
+
+/** 挑覆盖最差的部位给一条提示；全部贴合时偶尔鼓励一句。 */
+function maybeCoachTip(regions) {
+  if (!regions.length) return;
+  const now = performance.now();
+
+  const candidates = regions.filter(
+    (r) => r.a >= TIP_MIN_PIXELS && r.b >= TIP_MIN_PIXELS && r.cover < TIP_MIN_COVER
+  );
+
+  if (!candidates.length) {
+    const solid = regions.filter((r) => r.a >= TIP_MIN_PIXELS);
+    const good = solid.length >= 3 && solid.every((r) => r.cover >= 0.72);
+    if (good && now - lastPraiseAt > PRAISE_INTERVAL_MS) {
+      lastPraiseAt = now;
+      showCoachTip('这个动作很贴合，保持住！');
+    }
+    return;
+  }
+
+  candidates.sort((x, y) => x.cover - y.cover);
+  const worst = candidates[0];
+  const last = regionTipAt.get(worst.region.key) || 0;
+  if (now - last < TIP_COOLDOWN_MS) return;
+  regionTipAt.set(worst.region.key, now);
+  showCoachTip(tipTextFor(worst));
 }
 
 function drawCameraOverlay() {
@@ -1565,9 +1764,7 @@ function drawCameraOverlay() {
 
   if (!state.livePose) return;
 
-  if (state.shadows && state.liveMask) {
-    drawShadow(ctx, state.liveMask, rect, '#00e5a0', 0.35);
-  }
+  // 摄像头画面只显示骨架：人物阴影集中在教学画面做对比，避免两侧重复
   if (state.skeleton) {
     drawPose(ctx, state.livePose, rect, {
       color: '#00e5a0',
