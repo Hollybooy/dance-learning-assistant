@@ -20,7 +20,7 @@ import { mediaUrl } from './config.js';
 const PRELOAD_AHEAD = 36;
 
 export class ReplayPlayer {
-  constructor({ canvas, seekBar, timeLabel, playButton, getTeachFrames, getTeachMasks }) {
+  constructor({ canvas, seekBar, timeLabel, playButton, getTeachFrames, getTeachMasks, onState }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.seekBar = seekBar;
@@ -28,6 +28,8 @@ export class ReplayPlayer {
     this.playButton = playButton;
     this.getTeachFrames = getTeachFrames;
     this.getTeachMasks = getTeachMasks || null;
+    // 播放状态变化时通知外部：播放按钮的图标由外部统一维护
+    this.onState = onState || null;
 
     this.session = null;
     this.frames = [];
@@ -281,7 +283,6 @@ export class ReplayPlayer {
     const ratio = this.duration > 0 ? this.playhead / this.duration : 0;
     this.seekBar.value = String(Math.round(ratio * 1000));
     this.timeLabel.textContent = `${formatTime(this.playhead)} / ${formatTime(this.duration)}`;
-    this.playButton.textContent = this.playing ? '暂停' : '播放';
   }
 
   play() {
@@ -290,12 +291,14 @@ export class ReplayPlayer {
     this.playing = true;
     this._lastTick = performance.now();
     this._syncBar();
+    this.onState?.(true);
     requestAnimationFrame(this._tick);
   }
 
   pause() {
     this.playing = false;
     if (this.session) this._syncBar();
+    this.onState?.(false);
   }
 
   toggle() {

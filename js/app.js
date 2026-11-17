@@ -36,12 +36,6 @@ const SETTINGS_KEY = 'danceplus_settings_v1';
 const FRIENDS_KEY = 'danceplus_friends_v1';
 const PROFILE_STATS_KEY = 'danceplus_profile_stats_v1';
 const PLAYBACK_RATES = [0.75, 0.9, 1, 1.25, 1.5];
-/**
- * 是否在「练习回放」列表里拼接内置演示记录。
- * 演示记录没有真实录制文件（只有本地课程画面 + 写死的分数），
- * 默认关闭，避免和真实录制混在一起造成误解；需要演示时手动改 true。
- */
-const SHOW_DEMO_SESSIONS = false;
 const ROUTES = ['cover', 'home', 'classes', 'class', 'learning', 'history', 'about', 'correct', 'profile'];
 const STAGE_ROUTES = new Set(['learning', 'correct']);
 const CATEGORIES = [
@@ -261,6 +255,63 @@ function navigate(hash) {
   else location.hash = hash;
 }
 
+/* ------------------------------------------------------------- 封面 → 首页 */
+
+/** 进入页停留时长：3 秒后自动进入 Home */
+const COVER_AUTOPLAY_MS = 3000;
+/** 与 .cover 的 transition / .shell.is-entering 动画时长保持一致 */
+const COVER_FADE_MS = 560;
+
+let coverTimer = 0;
+/** 记录本次进入页是否已经触发过进场，避免重复调用 */
+let coverEntered = false;
+
+function clearCoverAutoEnter() {
+  if (coverTimer) window.clearTimeout(coverTimer);
+  coverTimer = 0;
+}
+
+function scheduleCoverAutoEnter() {
+  clearCoverAutoEnter();
+  if (coverEntered) return;
+  coverTimer = window.setTimeout(() => enterFromCover('#/home'), COVER_AUTOPLAY_MS);
+}
+
+/**
+ * 从进入页过渡到目标页：封面淡出 + 外壳淡入在同一帧交叉进行。
+ * 不依赖 hashchange（内嵌预览等环境下 hash 变化不一定回调），路由与视图直接同步。
+ */
+function enterFromCover(target = '#/home') {
+  clearCoverAutoEnter();
+
+  const cover = $('view-cover');
+  if (!cover || coverEntered) return;
+  if (parseRoute().name !== 'cover') return;
+  coverEntered = true;
+
+  // 1) 先把外壳显示出来，才有交叉过渡而不是硬切
+  shell.hidden = false;
+  shell.classList.add('is-entering');
+
+  // 2) 封面进入退场态（.is-leaving 自带 display:block，路由摘掉 .is-active 也不会中断）
+  cover.classList.add('is-leaving');
+
+  // 3) 同步地址栏与视图
+  try {
+    if (location.hash !== target) history.replaceState(null, '', target);
+  } catch (err) {
+    location.hash = target;
+  }
+  applyRoute();
+
+  // 4) 过渡结束收尾，封面恢复干净状态，下次回到封面仍能重播入场动画
+  window.setTimeout(() => {
+    cover.classList.remove('is-leaving');
+    shell.classList.remove('is-entering');
+    coverEntered = false;
+  }, COVER_FADE_MS);
+}
+
 function markNav(name) {
   const key =
     name === 'class' || name === 'learning' ? 'classes' : name === 'correct' ? 'history' : name;
@@ -281,8 +332,17 @@ async function applyRoute() {
 
   state.route = name;
 
+  // 进入页：停留 3 秒自动进场；其他页面清掉计时器
+  if (name === 'cover') scheduleCoverAutoEnter();
+  else clearCoverAutoEnter();
+
   $$('[data-view]').forEach((view) => view.classList.toggle('is-active', view.dataset.view === name));
   document.body.classList.toggle('is-cover', name === 'cover');
+  // 底部搜索停靠区只在首页出现
+  document.body.classList.toggle('is-home', name === 'home');
+  // 课程页把左侧导航收进 Categories 底部的图标（点开为压在页面上的浮层）
+  document.body.classList.toggle('is-classes', name === 'classes');
+  syncClassesFoot();
   shell.hidden = name === 'cover';
   shell.classList.toggle('is-immersive', STAGE_ROUTES.has(name));
   main.classList.toggle('is-stage', STAGE_ROUTES.has(name));
@@ -292,6 +352,7 @@ async function applyRoute() {
 
   if (prev === 'learning' && name !== 'learning' && !state.recording) live.stop();
   if (name !== 'classes') stopArc(prev === 'classes');
+  if (name !== 'home') stopRecAuto();
   if (prev === 'learning' && name !== 'learning') {
     exitRecordingLayout();
     setOverlayMode(false);
@@ -299,6 +360,8 @@ async function applyRoute() {
   if (prev === 'correct' && name !== 'correct') {
     player.pause();
     $('replay-video')?.pause();
+    // 离开回放页就把摄像头窗格关掉，别让摄像头一直亮着
+    setReplayMode(false);
   }
 
   if (name === 'home') renderHome();
@@ -310,6 +373,9 @@ async function applyRoute() {
   if (name === 'class') await openRouteClass(param);
   if (name === 'history') await refreshSessions(false);
   if (name === 'correct') {
+    // 每次进来都从全屏剧场开始
+    setReplayMode(false);
+    dismissIdle();
     if (!state.sessions.length) await refreshSessions(true);
     if (param) await loadSession(param);
     else if (state.currentSessionId) await loadSession(state.currentSessionId);
@@ -349,11 +415,25 @@ function toggleTheme() {
 function openRail() {
   shell.classList.add('is-rail-open');
   $('rail-scrim').hidden = false;
+  $('classes-rail-trigger')?.setAttribute('aria-expanded', 'true');
 }
 
 function closeRail() {
   shell.classList.remove('is-rail-open');
   $('rail-scrim').hidden = true;
+  $('classes-rail-trigger')?.setAttribute('aria-expanded', 'false');
+}
+
+/* 课程页把「个人区」从导航搬到分类面板底部：直接移动节点，头像/昵称/状态仍是同一份数据，
+   不用在两处同步。窄屏（分类栏变横向条）时留在导航里，跟着抽屉一起出现。 */
+function syncClassesFoot() {
+  const foot = document.querySelector('.rail__foot');
+  const slot = $('classes-profile-slot');
+  const rail = $('rail');
+  if (!foot || !slot || !rail) return;
+  const inClasses = document.body.classList.contains('is-classes') && window.innerWidth > 960;
+  const host = inClasses ? slot : rail;
+  if (foot.parentElement !== host) host.appendChild(foot);
 }
 
 function initRail() {
@@ -473,18 +553,32 @@ function generateSegmentThumbnails(course) {
   return job;
 }
 
-/** 本地课程时长与切片：7 秒一片；古风燃脂按 10 个文件分别计时 */
+/**
+ * 本地课程时长与切片。
+ * - 古风燃脂：整片拿它自己的真实时长，10 个切片各自计时；
+ *   切片文件的 start/end 仍是"文件内 0~时长"（跟练页就是单独播切片），
+ *   另外记一份 masterStart/masterEnd 表示它在整片时间轴上的位置，回放页的分段条用这份。
+ * - 其他风格：整段视频按 7 秒虚拟分段。
+ */
 async function hydrateLocalCourses() {
   await Promise.all(
     state.localCourses.map(async (course) => {
       if (course.master) {
-        const durations = await Promise.all(course.segments.map((segment) => probeDuration(segment.src)));
-        let total = 0;
+        const [masterSeconds, ...sliceSeconds] = await Promise.all([
+          probeDuration(course.video),
+          ...course.segments.map((segment) => probeDuration(segment.src)),
+        ]);
+        const total =
+          masterSeconds || course.duration || sliceSeconds.reduce((sum, value) => sum + (value || 0), 0);
+        const step = total / Math.max(1, course.segments.length);
         course.segments.forEach((segment, index) => {
-          const value = durations[index] || 0;
+          const value = sliceSeconds[index] || segment.seconds || 0;
+          segment.start = 0;
           segment.end = value;
           segment.duration = value;
-          total += value;
+          segment.seconds = value;
+          segment.masterStart = Number((index * step).toFixed(3));
+          segment.masterEnd = Number(((index + 1) * step).toFixed(3));
         });
         course.duration = total;
       } else {
@@ -536,9 +630,7 @@ async function loadLibrary({ silent = false } = {}) {
   // 完整远端列表：内置课程关联（backendId）时从这里取后端数据源
   state.remoteVideos = remote;
   // 视频库里隐藏已被内置课程关联的同内容视频，避免出现两份
-  const linked = new Set(
-    state.localCourses.map((course) => course.backendId).filter(Boolean)
-  );
+  const linked = new Set(state.localCourses.map((course) => course.backendId).filter(Boolean));
   const shown = remote.filter((video) => !linked.has(video.id));
   state.videos = [...state.localCourses, ...shown];
   if (libraryLoaded) {
@@ -552,9 +644,158 @@ async function loadLibrary({ silent = false } = {}) {
   }
 }
 
+/* ----------------------------------------- 首页推荐：分层堆叠轮播（横向 coverflow） */
+
+/**
+ * 三层参数，对应设计稿里 5 张卡片的堆叠关系：
+ * 中心 100%，相邻 91.9%，外圈 79.1%；x 是相对自身卡宽的百分比位移，o 是透明度。
+ */
+const REC_LEVELS = [
+  { x: 0, s: 1, o: 1 },
+  { x: 70.2, s: 0.919, o: 0.8 },
+  { x: 121, s: 0.791, o: 0.7 },
+];
+
+let recIndex = 0;
+let recCards = [];
+let recDragMovedAt = 0;
+let recTimer = 0;
+
+/** 自动轮播：每 4.6s 转一张；手动点箭头/拖拽后暂停，静置 8s 再恢复 */
+const REC_AUTOPLAY_MS = 4600;
+const REC_IDLE_RESUME_MS = 8000;
+
+let recResumeTimer = 0;
+
+function stopRecAuto() {
+  if (recTimer) window.clearInterval(recTimer);
+  recTimer = 0;
+}
+
+function startRecAuto() {
+  stopRecAuto();
+  if (recResumeTimer) window.clearTimeout(recResumeTimer);
+  recResumeTimer = 0;
+  if (recCards.length < 3) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  recTimer = window.setInterval(() => {
+    const home = $('view-home');
+    if (!home || !home.classList.contains('is-active')) return;
+    moveRec(1);
+  }, REC_AUTOPLAY_MS);
+}
+
+/**
+ * 用户手动翻页后停掉自动轮播并进入冷却。
+ * 否则自动轮播会在几下点击之间偷偷多走一张，看上去就是"跳了一页"。
+ */
+function holdRecAuto() {
+  stopRecAuto();
+  if (recResumeTimer) window.clearTimeout(recResumeTimer);
+  recResumeTimer = window.setTimeout(() => {
+    recResumeTimer = 0;
+    startRecAuto();
+  }, REC_IDLE_RESUME_MS);
+}
+
+/** 幕后位置：比最外层再远一档，透明度为 0，用来接住暂时轮空的那张卡 */
+const REC_OFFSTAGE_X = 165;
+const REC_OFFSTAGE_S = 0.75;
+
+/**
+ * 写入一张卡的位置参数。
+ * snap 用于跨越式补位（比如从左幕后直接补到右二圈）：先把位移瞬时落定、再单独淡入，
+ * 避免 transform 从 -146% 过渡到 +121% 时那张卡横穿舞台。
+ */
+function setRecCard(card, x, scale, opacity, snap) {
+  if (snap) {
+    card.style.transition = 'none';
+    card.style.setProperty('--x', String(x));
+    card.style.setProperty('--s', String(scale));
+    card.style.setProperty('--o', '0');
+    void card.offsetWidth; // 强制回流，让瞬移立即生效
+    card.style.transition = '';
+    card.style.setProperty('--o', String(opacity));
+    return;
+  }
+  card.style.setProperty('--x', String(x));
+  card.style.setProperty('--s', String(scale));
+  card.style.setProperty('--o', String(opacity));
+}
+
+/**
+ * 排布一列「中心卡 + 两侧堆叠」的卡片。
+ * 首页推荐和回放页的片段轮播共用这一套：同一组 REC_LEVELS、同一套无限循环与瞬移补位逻辑，
+ * 只是传入的卡片数组和中心索引不同。
+ *
+ * step 是本次翻页方向：>0 表示往"下一张"，此时轮空的那张卡下次会从右侧补位，
+ * 所以它要先停在右侧幕后，才能顺着方向滑进来（否则就只能原地淡入，看着像卡片凭空出现）。
+ */
+function layoutStack(cards, centerIndex, step = 0, levels = REC_LEVELS) {
+  const total = cards.length;
+  const entrySide = step >= 0 ? 1 : -1;
+
+  cards.forEach((card, index) => {
+    let distance = index - centerIndex;
+    if (total >= 3) {
+      // 绕半圈就翻到另一侧，做成无限循环；区间取 (-total/2, total/2]，
+      // 偶数张卡时多出来的那张永远落在左侧幕后，不会左右横跳
+      distance = (((index - centerIndex) % total) + total) % total;
+      if (distance >= total / 2) distance -= total;
+    }
+    const prev = card.dataset.recDist === undefined ? null : Number(card.dataset.recDist);
+    const prevX = Number(card.dataset.recX || 0);
+    const wasOffstage = card.dataset.recOff === '1';
+    const level = levels[Math.abs(distance)];
+
+    card.dataset.recDist = String(distance);
+    card.dataset.level = String(Math.abs(distance));
+    card.classList.toggle('is-center', distance === 0);
+
+    if (!level) {
+      card.classList.add('is-offstage');
+      card.style.zIndex = '1';
+      card.tabIndex = -1;
+      // 刚离开可见区的卡：顺着它离开的方向滑出去并淡掉；
+      // 本来就在幕后的卡：悄悄挪到下一次进场的那一侧（不可见，瞬移无感）
+      const x = wasOffstage
+        ? entrySide * REC_OFFSTAGE_X
+        : (Math.sign(prevX) || entrySide) * REC_OFFSTAGE_X;
+      setRecCard(card, x, REC_OFFSTAGE_S, 0, prev === null || wasOffstage);
+      card.dataset.recX = String(x);
+      card.dataset.recOff = '1';
+      return;
+    }
+
+    card.classList.remove('is-offstage');
+    card.style.zIndex = String(20 - Math.abs(distance));
+    card.tabIndex = 0;
+    const x = distance < 0 ? -level.x : level.x;
+    // 只有当一张"看得见"的卡要横跨大半个舞台时才瞬移（例如奇数张卡绕圈时 -2 直接补到 +2）。
+    // 幕后的卡走到外侧档位只有 40 多个百分点，正常过渡就是顺滑的滑入。
+    const teleport = prev === null || (!wasOffstage && Math.abs(x - prevX) > 180);
+    setRecCard(card, x, level.s, level.o, teleport);
+    card.dataset.recX = String(x);
+    card.dataset.recOff = '0';
+  });
+}
+
+function layoutRec(step = 0) {
+  layoutStack(recCards, recIndex, step);
+}
+
+function moveRec(step) {
+  const total = recCards.length;
+  if (total < 2) return;
+  recIndex = (recIndex + step + total) % total;
+  layoutRec(step);
+}
+
 function renderHome() {
   const track = $('home-carousel-track');
   track.innerHTML = '';
+  recCards = [];
+  recIndex = 0;
   // 首页只排布非 using_total 系列的素材（内置风格课程 + 后台上传视频）
   const videos = state.videos.filter((video) => !video.master).slice(0, 12);
 
@@ -569,6 +810,8 @@ function renderHome() {
     empty.innerHTML = `<span><svg><use href="#i-upload"/></svg>上传第一个教学视频</span>`;
     empty.addEventListener('click', pickFile);
     track.appendChild(empty);
+    recCards = [empty];
+    layoutRec();
     return;
   }
 
@@ -597,15 +840,29 @@ function renderHome() {
     if (!cover) {
       card.style.background = 'linear-gradient(140deg, #1db56b, #0c6b39)';
     }
-    card.addEventListener('click', () => openCourse(video.id));
+    const position = recCards.length;
+    recCards.push(card);
+    card.addEventListener('click', () => {
+      if (Date.now() - recDragMovedAt < 320) return; // 拖拽松手后的误触
+      if (position !== recIndex) {
+        // 点两侧的卡：先把它转到中间，再点一次才进课程
+        recIndex = position;
+        layoutRec();
+        return;
+      }
+      openCourse(video.id);
+    });
     track.appendChild(card);
   });
+
+  layoutRec();
+  startRecAuto();
 }
 
 /* ------------------------------------------------------- 课程大厅 / 弧形轮播 */
 
 const DEFAULT_CLASSES_BG =
-  'assets/media/hero-01-classes-studio.jpg';
+  'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=bright%20minimal%20dance%20studio%20interior%20with%20wooden%20floor%20and%20large%20mirrors%2C%20soft%20daylight%2C%20empty%20room%2C%20architectural%20photography&image_size=landscape_16_9';
 
 function arcOffset(index) {
   const total = state.localCourses.length;
@@ -638,6 +895,7 @@ function renderArc() {
       <span class="arc-card__go">查看课程</span>
     `;
     card.addEventListener('click', () => {
+      if (Date.now() - arcDragMovedAt < 320) return; // 拖拽松手后的误触
       if (arcOffset(index) === 0) openCourse(video.id);
       else {
         state.arcIndex = index;
@@ -656,26 +914,85 @@ function renderArc() {
     });
     dots.appendChild(dot);
   });
-  updateArc();
+  updateArc(true); // 首次排布不要过渡：否则卡片会从舞台左上角飞出来
 }
 
-function updateArc() {
-  const gap = window.innerWidth < 720 ? 126 : window.innerWidth < 1100 ? 184 : 238;
+const ARC_STEP = 17; // 相邻两档之间的角度（度）
+const ARC_MAX = 3; // 最多看到中心两侧各 3 档（共 7 张）
+let arcDragMovedAt = 0;
+let arcRelayoutTimer = 0;
+
+/**
+ * 扇形几何：圆心落在舞台右侧之外，卡片沿左侧圆弧一张张排开。
+ * θ = 档位 × 每档角度；卡片中心 = 圆心 + R·(-cosθ, -sinθ)，
+ * 越靠外（|θ| 越大）卡片越小、透明度越低——和设计稿 1440×1024 里的坐标一致：
+ * 圆心大约在画面右侧再往外 0.3 个画面宽处，半径 ≈ 0.55 个画面高。
+ */
+function arcMetrics() {
+  const stage = $('arc-stage');
+  if (!stage) return null;
+  const wide = stage.clientWidth || 760;
+  const tall = stage.clientHeight || 420;
+  const narrow = wide < 620;
+  const step = narrow ? 14 : ARC_STEP;
+  // 主卡高度按舞台高取，宽高比 301:169（设计稿里那张最大的卡）
+  const cardH = Math.round(Math.min(Math.max(tall * (narrow ? 0.17 : 0.2), narrow ? 88 : 112), narrow ? 132 : 188));
+  const cardW = Math.round(cardH * (301 / 169));
+  // 半径同时受高和宽约束：先用「最外侧那张卡刚好不出上下边」反解一个上限，
+  // 再和宽、高的经验值取小——这样视口怎么变，扇形都不会被舞台边缘切掉。
+  const maxRad = (ARC_MAX * step * Math.PI) / 180;
+  const fitR = (tall / 2 - cardH * 0.62) / Math.sin(maxRad);
+  const radius = Math.round(Math.max(170, Math.min(tall * 0.56, wide * 0.9, fitR)));
+  // 圆心：让中心卡停在舞台宽度 66% 的位置（扇形整体贴右，左侧留给标题）
+  const cx = Math.round(wide * 0.66 + radius);
+  const cy = Math.round(tall * 0.52);
+  return { wide, tall, step, cardW, cardH, radius, cx, cy };
+}
+
+function arcScale(deg) {
+  // 角度越大越小；17° ≈ 0.71、34° ≈ 0.55、51° ≈ 0.45
+  return 1 / (1 + Math.abs(deg) / 42);
+}
+
+function updateArc(fresh) {
+  const metrics = arcMetrics();
+  const stage = $('arc-stage');
+  if (!metrics || !stage) return;
+  // 首次排布（或换分类重建卡片后）先关掉过渡，直接落位
+  if (fresh) stage.classList.add('is-fresh');
+  stage.style.setProperty('--arc-w', `${metrics.cardW}px`);
+  stage.style.setProperty('--arc-h', `${metrics.cardH}px`);
+
   $$('#arc-stage .arc-card').forEach((card) => {
     const index = Number(card.dataset.index);
     const offset = arcOffset(index);
     const abs = Math.abs(offset);
-    card.style.transform = `translate(-50%, -50%) translateX(${offset * gap}px) translateY(${abs * 22}px) scale(${offset === 0 ? 1 : 0.78})`;
-    card.style.zIndex = String(100 - abs);
-    card.style.opacity = abs > 2 ? '0' : offset === 0 ? '1' : abs === 1 ? '0.48' : '0.16';
-    card.style.pointerEvents = abs > 2 ? 'none' : 'auto';
+    const deg = offset * metrics.step;
+    const theta = (deg * Math.PI) / 180;
+    const scale = arcScale(deg);
+    // 圆心在右侧，卡片在圆心左边 → x = cx - R·cosθ；θ 为正时在圆心上方 → y = cy - R·sinθ
+    const x = metrics.cx - metrics.radius * Math.cos(theta);
+    const y = metrics.cy - metrics.radius * Math.sin(theta);
+
+    card.style.setProperty('--tx', `${Math.round(x - metrics.cardW / 2)}px`);
+    card.style.setProperty('--ty', `${Math.round(y - metrics.cardH / 2)}px`);
+    card.style.setProperty('--rot', `${Math.round(deg)}deg`);
+    card.style.setProperty('--s', scale.toFixed(3));
+    card.style.zIndex = String(60 - abs);
+    card.style.opacity = abs > ARC_MAX ? '0' : '1';
+    card.style.pointerEvents = abs > ARC_MAX ? 'none' : 'auto';
     card.classList.toggle('is-active', offset === 0);
   });
+
   $$('#arc-dots .arc__dot').forEach((dot, index) => {
     dot.classList.toggle('is-active', index === state.arcIndex);
   });
   if ($('arc-counter')) {
     $('arc-counter').textContent = `${String(state.arcIndex + 1).padStart(2, '0')} / ${String(state.localCourses.length).padStart(2, '0')}`;
+  }
+  if (fresh) {
+    void stage.offsetWidth; // 强制回流，让落位先生效
+    window.requestAnimationFrame(() => stage.classList.remove('is-fresh'));
   }
 }
 
@@ -693,7 +1010,7 @@ function startArc() {
     if (state.route !== 'classes' || state.category !== 'all') return;
     state.arcIndex = (state.arcIndex + 1) % state.localCourses.length;
     updateArc();
-  }, 4000);
+  }, 4600);
 }
 
 function stopArc(clear = false) {
@@ -724,7 +1041,7 @@ function renderClassAlbums() {
     renderArc();
     startArc();
     $('classes-title').textContent = '本周精选 7 节课程';
-    $('classes-sub').textContent = '弧形轮播每 4 秒自动切换，点击中间的卡片查看课程详情。';
+    $('classes-sub').textContent = '扇形轮播每 4.6 秒自动切换；上下拖拽或点两侧卡片可换一张，点中间的卡片查看详情。';
   } else {
     stopArc();
     const list = $('class-albums');
@@ -889,13 +1206,11 @@ function renderDetail() {
     ? meta.master
       ? '内置课程'
       : '本地素材'
-    : meta.builtin && meta.pose_status === 'ready'
-      ? '内置课程 · 骨架就绪'
-      : meta.pose_status === 'ready'
-        ? '骨架已就绪'
-        : meta.pose_status === 'failed'
-          ? '骨架失败'
-          : '分析中';
+    : meta.pose_status === 'ready'
+      ? '骨架已就绪'
+      : meta.pose_status === 'failed'
+        ? '骨架失败'
+        : '分析中';
   $('detail-desc').textContent = meta.local
     ? `${meta.desc || '内置教学素材。'}${
         meta.master
@@ -1432,11 +1747,6 @@ function prepareCanvas(canvas) {
   return { ctx, width, height };
 }
 
-/*
- * 注意：视频必须用 CSS `object-fit: contain`，画布上的骨架/阴影按 fitRect() 的 contain 矩形映射，
- * 两边口径一致才不会整体偏移；改成 cover 的话 fitRect 需要同步换成 cover 矩形。
- */
-
 function drawTeachOverlay() {
   if (!$('view-learning').classList.contains('is-active')) return;
   const prepared = prepareCanvas(teachOverlay);
@@ -1466,12 +1776,12 @@ function drawTeachOverlay() {
     });
   }
 
+  // 你的轮廓（绿）叠加到教学画面 + 重合百分比 + 小教练提示
   if (state.livePose && cameraVideo.videoWidth) {
     const liveRect = { x: 0, y: 0, w: cameraVideo.videoWidth, h: cameraVideo.videoHeight };
     // 摄像头画面是镜像的：先翻回正向视角，再映射到教学帧
     const flippedLive = flipX(state.livePose);
 
-    // 你的人物阴影（绿）映射到教学画面 + 重合度
     let liveRectNorm = null;
     if (state.shadows && state.liveMask) {
       const shadowRect = mapShadowRect(flippedLive, liveRect, frame.pose, rect);
@@ -1783,15 +2093,6 @@ function drawCameraOverlay() {
     const mapped = mapPose(flippedTeach, teachRect, state.livePose, rect);
     if (!mapped) return;
 
-    if (state.shadows && state.video) {
-      const maskBitmap = getTeachMask(state.video.id, teaching.i);
-      if (maskBitmap) lastTeachMask = maskBitmap;
-      const activeMask = maskBitmap || lastTeachMask;
-      if (activeMask) {
-        const shadowRect = mapShadowRect(flippedTeach, teachRect, state.livePose, rect);
-        if (shadowRect) drawShadow(ctx, activeMask, shadowRect, '#ff5c8a', 0.22, true);
-      }
-    }
     drawPose(ctx, mapped, rect, {
       color: '#ff5c8a',
       lineWidth: 2.5,
@@ -1816,6 +2117,7 @@ const player = new ReplayPlayer({
   timeLabel: $('replay-time'),
   playButton: $('replay-toggle'),
   getTeachFrames: getTeachFramesFor,
+  onState: (playing) => setPlayIcon(playing),
   getTeachMasks: async (videoId) => {
     if (!teachMaskFrames.has(videoId)) {
       let url = state.video?.id === videoId ? state.video?.masks_url : null;
@@ -1831,6 +2133,311 @@ const player = new ReplayPlayer({
     return teachMaskFrames.get(videoId) ?? null;
   },
 });
+
+/* ------------------------------------------------- 回放：整片 / 切片 / 分段条 */
+
+/**
+ * 片段轮播的档位参数：和首页同一套结构（中心/相邻/外圈三层 + 位移百分比 + 透明度），
+ * 只是回放页的卡片小得多，位移要摊得更开，五张卡才能连贯铺开、不糊成一团。
+ */
+const STRIP_LEVELS = [
+  { x: 0, s: 1, o: 1 },
+  { x: 100, s: 0.9, o: 0.92 },
+  { x: 172, s: 0.8, o: 0.8 },
+];
+
+// 当前回放的切片索引（古风燃脂：10 段），以及分段条上每一块的数据
+let replaySegments = [];
+let replayBlocks = [];
+let replaySeg = 0;
+let stripCards = [];
+let stripIndex = 0;
+let idleTimer = 0;
+let replayCameraStream = null;
+let replayCamRaf = 0;
+let replayCamStartedAt = 0;
+
+/** 播放按钮只换图标，不再在按钮里写"播放/暂停"两个汉字 */
+function setPlayIcon(playing) {
+  const button = $('replay-toggle');
+  if (!button) return;
+  const use = button.querySelector('use');
+  if (use) use.setAttribute('href', playing ? '#i-pause' : '#i-play');
+  button.classList.toggle('is-playing', playing);
+  button.setAttribute('aria-label', playing ? '暂停' : '播放');
+  $('replay-root')?.classList.toggle('is-playing', playing);
+  if (playing) dismissIdle();
+  else {
+    $('replay-root')?.classList.remove('is-idle');
+    if (idleTimer) window.clearTimeout(idleTimer);
+    idleTimer = 0;
+  }
+}
+
+/** 播放中鼠标静止一会儿就把控件淡出，把整块画面还给视频；动一下鼠标立刻回来 */
+function dismissIdle() {
+  const root = $('replay-root');
+  if (!root) return;
+  root.classList.remove('is-idle');
+  if (idleTimer) window.clearTimeout(idleTimer);
+  idleTimer = window.setTimeout(() => {
+    idleTimer = 0;
+    if (root.classList.contains('is-playing') && root.classList.contains('is-cinema')) {
+      root.classList.add('is-idle');
+    }
+  }, 2400);
+}
+
+function replayDuration() {
+  const video = $('replay-video');
+  if (activeDemoSession && !video.hidden) {
+    return Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : activeDemoSession.duration || 0;
+  }
+  return player.duration || 0;
+}
+
+function replayTime() {
+  const video = $('replay-video');
+  if (activeDemoSession && !video.hidden) return video.currentTime;
+  return player.playhead || 0;
+}
+
+/** 跳到某个时间点：有视频就 seek 视频，逐帧回放就 seek 播放器 */
+function seekReplay(time, autoplay = true) {
+  const video = $('replay-video');
+  if (activeDemoSession && !video.hidden) {
+    const end = replayDuration() || activeDemoSession.duration;
+    video.currentTime = Math.min(Math.max(0, end - 0.08), Math.max(0, time));
+    syncDemoReplay();
+    if (autoplay) video.play().catch(() => {});
+    return;
+  }
+  if (player.session) {
+    player.seek(time);
+    if (autoplay) player.play();
+  }
+}
+
+/* --------------------------------------------------------- 片段轮播（同首页） */
+
+/**
+ * 渲染切片卡片。每张卡对应一个切片文件：既拿它当封面帧（#t 定位到 0.6s），
+ * 也是点击后要跳转的那一段。排布复用 layoutStack，和首页推荐轮播是同一套代码。
+ */
+function renderReplayStrip(session) {
+  const track = $('correct-filmstrip');
+  if (!track) return;
+  replaySegments = session?.segments?.length ? session.segments : [];
+  track.innerHTML = '';
+  stripCards = [];
+  stripIndex = 0;
+  replaySeg = 0;
+
+  if (!replaySegments.length) {
+    track.innerHTML = '<p class="film-empty">这条回放没有切片索引</p>';
+    updateSegTag();
+    return;
+  }
+
+  replaySegments.forEach((segment, index) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'strip-card';
+    card.dataset.seg = String(index);
+    // 角标写这段在整片时间轴上的起点（00:00 / 00:12 / 00:25…），
+    // 跟左下角的「第 N 段 · 00:00 – 00:12」和分段条对得上；切片自身时长只在跟练页有意义
+    const at = segStart(segment);
+    card.innerHTML = `
+      <video class="strip-card__media" src="${segment.src}#t=0.6" muted playsinline preload="metadata"
+        ${segment.thumbnail ? `poster="${segment.thumbnail}"` : ''}></video>
+      <span class="strip-card__veil"></span>
+      <span class="strip-card__cap"><b>第 ${index + 1} 段</b><small>${formatTime(at)}</small></span>
+    `;
+    card.addEventListener('click', () => seekReplay(segStart(segment), true));
+    track.appendChild(card);
+    stripCards.push(card);
+  });
+
+  layoutStack(stripCards, stripIndex, 0, STRIP_LEVELS);
+  updateSegTag();
+  markRibbonActive();
+}
+
+function centerStrip(index, step = 0) {
+  if (!stripCards.length) return;
+  const total = stripCards.length;
+  stripIndex = ((index % total) + total) % total;
+  replaySeg = stripIndex;
+  layoutStack(stripCards, stripIndex, step, STRIP_LEVELS);
+  updateSegTag();
+  markRibbonActive();
+}
+
+function updateSegTag() {
+  const tag = $('replay-seg-tag');
+  if (!tag) return;
+  if (!replaySegments.length) {
+    tag.hidden = true;
+    return;
+  }
+  const segment = replaySegments[replaySeg] || replaySegments[0];
+  tag.hidden = false;
+  tag.textContent = `第 ${replaySeg + 1} 段 / ${replaySegments.length} · ${formatTime(segStart(segment))} – ${formatTime(segEnd(segment))}`;
+}
+
+function markRibbonActive() {
+  $$('#error-ribbon .ribbon-block').forEach((block) => {
+    block.classList.toggle('is-active', Number(block.dataset.seg) === replaySeg);
+  });
+}
+
+/** 播放位置跨过段边界时，把轮播和分段条一起挪过去 */
+function syncReplaySegment(time) {
+  if (!replaySegments.length) return;
+  updateRibbonHead(time);
+  let index = replaySegments.findIndex((seg) => time >= segStart(seg) - 0.001 && time < segEnd(seg));
+  if (index < 0) index = time <= 0 ? 0 : replaySegments.length - 1;
+  if (index === replaySeg) {
+    markRibbonActive();
+    return;
+  }
+  centerStrip(index, index > replaySeg ? 1 : -1);
+}
+
+function updateRibbonHead(time) {
+  const ribbon = $('error-ribbon');
+  const head = $('ribbon-head');
+  if (!ribbon || !head) return;
+  const duration = replayDuration();
+  const ratio = duration > 0 ? Math.min(1, Math.max(0, time / duration)) : 0;
+  const pad = 4;
+  const usable = Math.max(0, ribbon.clientWidth - pad * 2);
+  head.style.left = `${pad + ratio * usable}px`;
+}
+
+/* ------------------------------------------------------- 全屏 / 骨骼分屏 */
+
+function setReplayMode(split) {
+  const root = $('replay-root');
+  if (!root) return;
+  root.classList.toggle('is-split', split);
+  root.classList.toggle('is-cinema', !split);
+  $('replay-cam').hidden = !split;
+  $('app-main').classList.toggle('is-flush', !split);
+  const button = $('replay-mode');
+  button.classList.toggle('is-on', split);
+  button.setAttribute('aria-pressed', String(split));
+  button.setAttribute('aria-label', split ? '切换为全屏视频' : '切换为骨骼分屏');
+  const use = button.querySelector('use');
+  if (use) use.setAttribute('href', split ? '#i-expand' : '#i-split');
+
+  if (split) openReplayCam();
+  else closeReplayCam();
+
+  // 两种模式的控件高度不一样，收藏按钮要跟着重算位置；片段卡也要按新宽度重排
+  requestAnimationFrame(() => {
+    syncDockHeight();
+    layoutStack(stripCards, stripIndex, 0, STRIP_LEVELS);
+    updateRibbonHead(replayTime());
+  });
+}
+
+function syncDockHeight() {
+  const dock = $('replay-dock');
+  const root = $('replay-root');
+  if (!dock || !root) return;
+  root.style.setProperty('--dock-h', `${dock.offsetHeight}px`);
+}
+
+/**
+ * 分屏右侧的摄像头窗格。
+ * 优先复用「跟练」那条实时链路的流（同一台摄像头只开一次），拿不到再自己开一路；
+ * 骨架点仍由 live 链路写进 state.livePose，这里只负责画。
+ */
+async function openReplayCam() {
+  const pane = $('replay-cam');
+  const video = $('replay-cam-video');
+  const note = $('replay-cam-note');
+  if (!pane || pane.hidden || !video) return;
+
+  note.hidden = false;
+  note.textContent = '正在打开摄像头…';
+  $('replay-cam-retry').hidden = true;
+
+  try {
+    if (!(live.running && live.stream)) await ensureLive();
+    let stream = live.running ? live.stream : null;
+
+    if (!stream) {
+      if (!replayCameraStream || !replayCameraStream.active) {
+        replayCameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 960 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      }
+      stream = replayCameraStream;
+    }
+
+    if (video.srcObject !== stream) video.srcObject = stream;
+    await video.play().catch(() => {});
+    replayCamStartedAt = performance.now();
+    if (!replayCamRaf) replayCamRaf = requestAnimationFrame(replayCamLoop);
+  } catch (error) {
+    note.textContent = cameraErrorMessage(error);
+    $('replay-cam-retry').hidden = false;
+  }
+}
+
+function replayCamLoop() {
+  replayCamRaf = requestAnimationFrame(replayCamLoop);
+  const pane = $('replay-cam');
+  if (!pane || pane.hidden) return;
+  const video = $('replay-cam-video');
+  const prepared = prepareCanvas($('replay-cam-overlay'));
+  if (!prepared || !video.videoWidth) return;
+  const { ctx, width, height } = prepared;
+  const note = $('replay-cam-note');
+
+  if (!state.livePose) {
+    if (performance.now() - replayCamStartedAt > 2200) {
+      note.hidden = false;
+      note.textContent = live.running
+        ? '摄像头已开启 · 骨骼链路未连接（启动后端服务后骨架会自动出现）'
+        : '摄像头未开启，点「重试连接」再试一次';
+    }
+    return;
+  }
+
+  note.hidden = true;
+  const rect = fitRect(width, height, video.videoWidth, video.videoHeight);
+  if (state.shadows && state.liveMask) {
+    drawShadow(ctx, state.liveMask, rect, '#00e5a0', 0.3);
+  }
+  drawPose(ctx, state.livePose, rect, {
+    color: '#00e5a0',
+    lineWidth: 2.6,
+    alpha: 0.85,
+    jointAlpha: 0.45,
+    shadow: true,
+  });
+}
+
+function closeReplayCam() {
+  if (replayCamRaf) window.cancelAnimationFrame(replayCamRaf);
+  replayCamRaf = 0;
+  const video = $('replay-cam-video');
+  if (video) video.srcObject = null;
+  // 自己开的那路流才停掉；复用实时链路的流要留给跟练页面
+  if (replayCameraStream && !(live.running && live.stream === replayCameraStream)) {
+    replayCameraStream.getTracks().forEach((track) => track.stop());
+  }
+  replayCameraStream = null;
+  // 保留最后一帧骨架会让人以为摄像头还在工作，直接清空
+  const canvas = $('replay-cam-overlay');
+  if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+}
 
 function sessionThumb(session) {
   if (session.demo && session.cover) return session.cover;
@@ -1849,15 +2456,18 @@ function buildDemoSessions() {
   return specs.map(([courseId, segmentIndex, duration, hoursAgo, score], order) => {
     const course = state.localCourses.find((item) => item.id === courseId) || state.localCourses[0];
     const segment = course?.segments?.[segmentIndex] || course?.segments?.[0];
+    // 古风燃脂有完整视频 + 10 个切片：回放走整片，切片作为分段索引用
+    const isMaster = Boolean(course?.master && course?.video);
     return {
       id: `local-demo-${order + 1}`,
       demo: true,
       title: `${course?.title || '舞蹈课程'} · 第 ${order + 1} 次练习`,
       video_id: course?.id || '',
-      video: segment?.src || course?.video || '',
+      video: isMaster ? course.video : segment?.src || course?.video || '',
+      segments: isMaster ? course.segments : [],
       cover: course?.cover || '',
-      duration,
-      frame_count: duration * 12,
+      duration: isMaster ? course.duration || duration : duration,
+      frame_count: Math.round((isMaster ? course.duration || duration : duration) * 12),
       score,
       created_at: new Date(Date.now() - hoursAgo * 3600000).toISOString(),
       frames: [],
@@ -1873,12 +2483,11 @@ async function refreshSessions(selectFirst = false) {
   } catch {
     /* 离线时仍展示完整、可播放的本地演示记录 */
   }
-  state.sessions = SHOW_DEMO_SESSIONS ? [...remote, ...buildDemoSessions()] : remote;
+  state.sessions = [...remote, ...buildDemoSessions()];
   renderHistory();
   renderCorrectFilmstrip();
   renderRail();
   renderFavorite();
-  updateSidePreviews();
 
   if (selectFirst && state.sessions.length) {
     const exists = state.sessions.some((item) => item.id === state.currentSessionId);
@@ -1904,7 +2513,7 @@ function renderHistory() {
       row.innerHTML = `
         <img class="history-row__thumb" src="${sessionThumb(session)}" alt="" loading="lazy" />
         <span class="history-row__body">
-          <b>${escapeHtml(session.title)}${session.demo ? ' <i class="tag-demo">演示</i>' : ''}</b>
+          <b>${escapeHtml(session.title)}</b>
           <small>${formatTime(session.duration)} · ${session.frame_count} 帧 · ${formatDate(session.created_at)}</small>
         </span>
         <span class="row-actions">
@@ -1945,15 +2554,7 @@ function renderHistory() {
       row.innerHTML = `
         <div class="progress-row__top">
           <b>${escapeHtml(video.title)}</b>
-          <span>${video.segments?.length || 0} 片段 · ${
-            video.local
-              ? '内置课程'
-              : video.pose_status === 'ready'
-                ? '骨架就绪'
-                : video.pose_status === 'failed'
-                  ? '骨架失败'
-                  : '分析中'
-          }</span>
+          <span>${video.segments?.length || 0} 片段 · ${video.pose_status === 'ready' ? '骨架就绪' : '分析中'}</span>
         </div>
         <div class="progress-row__bar"><i style="width:${Math.max(6, percent)}%"></i></div>
       `;
@@ -1965,32 +2566,13 @@ function renderHistory() {
 }
 
 function renderCorrectFilmstrip() {
-  const track = $('correct-filmstrip');
-  track.innerHTML = '';
-  if (!state.sessions.length) {
-    track.innerHTML = '<p class="film-empty">暂无练习回放</p>';
-    return;
-  }
-  state.sessions.forEach((session) => {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = `film-card${state.currentSessionId === session.id ? ' is-active' : ''}`;
-    card.dataset.id = session.id;
-    card.innerHTML = `
-      <img src="${sessionThumb(session)}" alt="" loading="lazy" />
-      <span>${formatTime(session.duration)}</span>
-    `;
-    card.addEventListener('click', () => loadSession(session.id));
-    track.appendChild(card);
-  });
+  // 兼容旧调用点：片段轮播跟着「当前回放」走，没有回放时清空
+  renderReplayStrip(activeDemoSession);
 }
 
 function markActiveSession() {
   $$('.history-row').forEach((row) => {
     row.classList.toggle('is-active', row.dataset.id === state.currentSessionId);
-  });
-  $$('#correct-filmstrip .film-card').forEach((card) => {
-    card.classList.toggle('is-active', card.dataset.id === state.currentSessionId);
   });
   renderRail();
   renderFavorite();
@@ -1998,18 +2580,53 @@ function markActiveSession() {
 
 let activeDemoSession = null;
 
+/**
+ * 本地演示视频：先整段取回来再喂给 <video>。
+ * 原因：预览用的静态服务器不返回 Accept-Ranges，video.seekable 会一直是空区间，
+ * 点分段条/拖进度都跳不动；换成内存里的 blob 之后可以随意 seek，也不依赖后端。
+ */
+const demoVideoCache = new Map();
+
+async function attachDemoVideo(session) {
+  const video = $('replay-video');
+  const src = session.video;
+  if (!src) return;
+  if (/^blob:/.test(src)) {
+    video.src = src;
+    video.load();
+    return;
+  }
+  try {
+    let url = demoVideoCache.get(src);
+    if (!url) {
+      const response = await fetch(src);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      url = URL.createObjectURL(await response.blob());
+      demoVideoCache.set(src, url);
+    }
+    video.src = url;
+  } catch {
+    // 取不回来就退回原地址，至少还能播放（只是不能拖进度）
+    video.src = src;
+  }
+  video.load();
+}
+
 function syncDemoReplay() {
   if (!activeDemoSession) return;
   const video = $('replay-video');
   const actual = Number.isFinite(video.duration) ? video.duration : activeDemoSession.duration;
-  const duration = Math.max(0, Math.min(activeDemoSession.duration, actual || activeDemoSession.duration));
+  // 整片回放以视频真实时长为准，切片时长只在没有视频时兜底
+  const duration = Math.max(0, actual || activeDemoSession.duration);
   const ratio = duration ? Math.min(1, video.currentTime / duration) : 0;
   $('replay-seek').value = String(Math.round(ratio * 1000));
   $('replay-time').textContent = `${formatTime(Math.min(video.currentTime, duration))} / ${formatTime(duration)}`;
-  $('replay-toggle').textContent = video.paused ? '播放' : '暂停';
+  setPlayIcon(!video.paused);
+  syncReplaySegment(video.currentTime);
   if (duration && video.currentTime >= duration && !video.paused) {
     video.pause();
     video.currentTime = duration;
+    setPlayIcon(false);
   }
 }
 
@@ -2024,11 +2641,12 @@ async function loadDemoSession(session) {
   video.hidden = false;
   $('replay-toggle').dataset.mode = 'video';
   $('replay-seek').dataset.mode = 'video';
-  video.src = session.video;
-  video.load();
+  await attachDemoVideo(session);
   $('replay-status').textContent = `${session.title} · 本地演示回放 · 跟随度 ${session.score}%`;
-  updateSidePreviews();
+  // 古风燃脂带 10 个切片：整片当时间轴，切片当分段索引
+  renderReplayStrip(session);
   renderErrorRibbon(session);
+  setPlayIcon(false);
 }
 
 async function loadSession(sessionId) {
@@ -2051,8 +2669,9 @@ async function loadSession(sessionId) {
     player.showTeach = $('replay-compare').checked;
     const count = await player.load(session);
     $('replay-status').textContent = `${session.title} · ${count} 帧 · ${formatTime(session.duration)}`;
-    updateSidePreviews();
+    renderReplayStrip(null);
     renderErrorRibbon(session);
+    setPlayIcon(player.playing);
   } catch (error) {
     $('replay-status').textContent = `回放加载失败：${error.message}`;
     renderErrorRibbon(null);
@@ -2073,8 +2692,7 @@ async function deleteSession(sessionId) {
     renderHistory();
     renderCorrectFilmstrip();
     renderRail();
-    updateSidePreviews();
-    toast('已删除该条演示回放');
+      toast('已删除该条演示回放');
     return;
   }
   try {
@@ -2099,30 +2717,6 @@ function stepSession(direction) {
   const next = Math.min(state.sessions.length - 1, Math.max(0, index + direction));
   if (next === index) return;
   navigate(`#/correct/${state.sessions[next].id}`);
-}
-
-function updateSidePreviews() {
-  const index = state.sessions.findIndex((item) => item.id === state.currentSessionId);
-  const prev = index > 0 ? state.sessions[index - 1] : null;
-  const next = index >= 0 && index < state.sessions.length - 1 ? state.sessions[index + 1] : null;
-
-  [['clip-prev', prev], ['clip-next', next]].forEach(([id, session]) => {
-    const button = $(id);
-    const image = button.querySelector('img');
-    if (session) {
-      button.disabled = false;
-      button.dataset.id = session.id;
-      image.src = sessionThumb(session);
-      image.alt = session.title;
-      button.querySelector('span').textContent = session.title;
-    } else {
-      button.disabled = true;
-      delete button.dataset.id;
-      image.removeAttribute('src');
-      image.alt = '';
-      button.querySelector('span').textContent = id === 'clip-prev' ? '没有上一条' : '没有下一条';
-    }
-  });
 }
 
 /* 跟随度：髋部对齐 + 躯干归一化后比较关键点距离，映射到 0~1 */
@@ -2155,23 +2749,84 @@ function poseSimilarity(a, b) {
   return Math.max(0, Math.min(1, 1 - sum / count / 1.15));
 }
 
+/**
+ * 跟随度分段条。
+ * 每一块 = 一个切片（古风燃脂的 10 段），块内 6 个小格 = 该段的跟随情况；
+ * 点任意一格就跳到那一格对应的时间点，也就是"跳到对应的片段"。
+ */
+const RIBBON_CELLS = 6;
+
+/** 片段在完整视频时间轴上的起止；没有 masterStart 时退回片段自身的起止 */
+const segStart = (segment) => (Number.isFinite(segment?.masterStart) ? segment.masterStart : segment?.start || 0);
+const segEnd = (segment) =>
+  Number.isFinite(segment?.masterEnd) ? segment.masterEnd : segment?.end || segStart(segment);
+
+function ribbonMarkup(blocks) {
+  const body = blocks
+    .map((block, index) => {
+      const cells = block.cells
+        .map((cell) => {
+          const cls = cell.bad ? ' is-bad' : cell.idle ? ' is-idle' : '';
+          return `<i class="ribbon-cell${cls}" data-t="${cell.t.toFixed(2)}"></i>`;
+        })
+        .join('');
+      return `<span class="ribbon-block" data-seg="${index}" data-start="${block.start.toFixed(2)}">${cells}</span>`;
+    })
+    .join('');
+  return `${body}<span class="ribbon-head" id="ribbon-head"></span>`;
+}
+
 async function renderErrorRibbon(session) {
   const ribbon = $('error-ribbon');
   const score = $('match-score');
-  const BUCKETS = 72;
+  replayBlocks = [];
+  if (!ribbon) return;
 
+  /* 本地演示回放：有切片就按切片分块，没有切片就按整条时间轴分 24 格 */
   if (session?.demo) {
-    ribbon.innerHTML = Array.from({ length: BUCKETS }, (_, index) => {
-      const bad = (index * 7 + session.id.length) % 17 < (session.score >= 90 ? 1 : 3);
-      return `<i class="${bad ? 'bad' : ''}" title="动作跟随度"></i>`;
-    }).join('');
+    const segments = session.segments?.length
+      ? session.segments
+      : [{ index: 0, start: 0, end: session.duration || 0 }];
+    const badEvery = session.score >= 90 ? 16 : 8;
+
+    replayBlocks = segments.map((segment, index) => {
+      const from = segStart(segment);
+      const span = Math.max(0.4, segEnd(segment) - from);
+      const cells = Array.from({ length: RIBBON_CELLS }, (_, cell) => ({
+        bad: (index * 5 + cell * 3 + session.id.length) % badEvery === 0,
+        t: from + ((cell + 0.5) / RIBBON_CELLS) * span,
+      }));
+      return { seg: index, start: from, end: segEnd(segment), cells };
+    });
+
+    ribbon.innerHTML = ribbonMarkup(replayBlocks);
     score.textContent = `平均跟随度 ${session.score}%`;
+    markRibbonActive();
+    updateRibbonHead(replayTime());
     return;
   }
 
+  /* 真实录制：没有骨架就没法算跟随度，整条置灰 */
+  const BUCKETS = 60;
+  const idleBlocks = (label) => {
+    replayBlocks = [
+      {
+        seg: 0,
+        start: 0,
+        end: session?.duration || 0,
+        cells: Array.from({ length: BUCKETS }, (_, index) => ({
+          idle: true,
+          t: ((session?.duration || 0) * (index + 0.5)) / BUCKETS,
+        })),
+      },
+    ];
+    ribbon.innerHTML = ribbonMarkup(replayBlocks);
+    score.textContent = label;
+    updateRibbonHead(replayTime());
+  };
+
   if (!session?.frames?.length || !session.video_id) {
-    ribbon.innerHTML = Array.from({ length: BUCKETS }, () => '<i class="idle"></i>').join('');
-    score.textContent = '--';
+    idleBlocks('--');
     return;
   }
 
@@ -2182,8 +2837,7 @@ async function renderErrorRibbon(session) {
     teachFrames = [];
   }
   if (!teachFrames.length) {
-    ribbon.innerHTML = Array.from({ length: BUCKETS }, () => '<i class="idle"></i>').join('');
-    score.textContent = '骨架未就绪';
+    idleBlocks('骨架未就绪');
     return;
   }
 
@@ -2192,9 +2846,8 @@ async function renderErrorRibbon(session) {
   const rate = session.teach_rate || 1;
   let sum = 0;
   let count = 0;
-  const cells = [];
 
-  for (let bucket = 0; bucket < BUCKETS; bucket += 1) {
+  const cells = Array.from({ length: BUCKETS }, (_, bucket) => {
     const t = (duration * (bucket + 0.5)) / BUCKETS;
     const record = poseAt(session.frames, t);
     const reference = poseAt(teachFrames, start + t * rate);
@@ -2204,12 +2857,13 @@ async function renderErrorRibbon(session) {
       sum += similarity;
       count += 1;
     }
-    const className = !similarity ? 'idle' : similarity >= 0.55 ? '' : 'bad';
-    cells.push(`<i class="${className}" title="跟随度 ${Math.round(similarity * 100)}%"></i>`);
-  }
+    return { t, bad: Boolean(similarity) && similarity < 0.55, idle: !similarity };
+  });
 
-  ribbon.innerHTML = cells.join('');
+  replayBlocks = [{ seg: 0, start: 0, end: duration, cells }];
+  ribbon.innerHTML = ribbonMarkup(replayBlocks);
   score.textContent = count ? `平均跟随度 ${Math.round((sum / count) * 100)}%` : '--';
+  updateRibbonHead(replayTime());
 }
 
 /* ------------------------------------------------------------------ 上传 */
@@ -2619,26 +3273,10 @@ function closeProfileModal() {
 /* ------------------------------------------------------------------ 事件绑定 */
 
 function bindEvents() {
-  $('enter-app').addEventListener('click', () => navigate('#/home'));
+  $('enter-app').addEventListener('click', () => enterFromCover('#/home'));
   $$('#cover-thumbs .thumb').forEach((thumb) => {
-    thumb.addEventListener('click', () => navigate(thumb.dataset.goto || '#/home'));
+    thumb.addEventListener('click', () => enterFromCover(thumb.dataset.goto || '#/home'));
   });
-
-  const heroImages = [
-    "url('assets/media/hero-06-dancer-leap.jpg')",
-    "url('assets/media/hero-07-dancer-green.jpg')",
-    "url('assets/media/hero-08-ballet-window.jpg')",
-  ];
-  let heroIndex = 0;
-  const coverPhoto = $('view-cover').querySelector('.cover__photo');
-  coverPhoto.style.backgroundImage = heroImages[0];
-  // 封面已移除左右箭头控件，改为缓慢自动切换主视觉
-  setInterval(() => {
-    heroIndex = (heroIndex + 1) % heroImages.length;
-    if (document.body.classList.contains('is-cover')) {
-      coverPhoto.style.backgroundImage = heroImages[heroIndex];
-    }
-  }, 9000);
 
   [$('theme-toggle'), $('cover-theme')].forEach((button) => {
     button.addEventListener('click', toggleTheme);
@@ -2648,7 +3286,27 @@ function bindEvents() {
   $('rail-close').addEventListener('click', closeRail);
   $('rail-scrim').addEventListener('click', closeRail);
 
-  $('home-refresh').addEventListener('click', () => loadLibrary());
+  // 课程页 Categories 底部的折叠图标：再点一次收起
+  $('classes-rail-trigger')?.addEventListener('click', () => {
+    if (shell.classList.contains('is-rail-open')) closeRail();
+    else openRail();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && shell.classList.contains('is-rail-open')) closeRail();
+  });
+  window.addEventListener('resize', () => {
+    syncClassesFoot();
+  });
+
+  $('home-refresh').addEventListener('click', (event) => {
+    // 图标按钮没有文字标签，用一次轻微“翻文件夹”反馈确认点击已生效
+    const btn = event.currentTarget;
+    btn.classList.remove('is-refreshing');
+    void btn.offsetWidth;
+    btn.classList.add('is-refreshing');
+    window.setTimeout(() => btn.classList.remove('is-refreshing'), 640);
+    loadLibrary();
+  });
   $('home-upload-btn').addEventListener('click', pickFile);
   $('upload-square').addEventListener('click', pickFile);
   $('class-upload-btn').addEventListener('click', pickFile);
@@ -2676,6 +3334,28 @@ function bindEvents() {
   $('class-arc').addEventListener('mouseenter', () => stopArc());
   $('class-arc').addEventListener('mouseleave', () => {
     if (state.route === 'classes' && state.category === 'all') startArc();
+  });
+
+  // 扇形轮播：拖拽换卡（鼠标和触屏都走 pointer 事件；上下拖、左右拖都认）
+  const arcStage = $('arc-stage');
+  let arcDragFrom = null;
+  arcStage.addEventListener('pointerdown', (event) => {
+    stopArc();
+    arcDragFrom = { x: event.clientX, y: event.clientY };
+  });
+  arcStage.addEventListener('pointerup', (event) => {
+    if (!arcDragFrom) return;
+    const dx = event.clientX - arcDragFrom.x;
+    const dy = event.clientY - arcDragFrom.y;
+    arcDragFrom = null;
+    const delta = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+    if (Math.abs(delta) < 40) return;
+    arcDragMovedAt = Date.now();
+    // 卡片沿弧线上下排开，往上拖 = 下一张；往左拖也当下一张（与首页轮播一致）
+    moveArc(delta < 0 ? 1 : -1);
+  });
+  arcStage.addEventListener('pointerleave', () => {
+    arcDragFrom = null;
   });
 
   $('detail-start').addEventListener('click', () => {
@@ -2865,16 +3545,22 @@ function bindEvents() {
     replayVideo.addEventListener(type, syncDemoReplay);
   });
   $('replay-toggle').addEventListener('click', () => {
-    if (!activeDemoSession) return;
-    if (replayVideo.paused) {
-      const end = Math.min(activeDemoSession.duration, replayVideo.duration || activeDemoSession.duration);
-      if (replayVideo.currentTime >= end - 0.05) replayVideo.currentTime = 0;
-      replayVideo.play().catch(() => {});
-    } else replayVideo.pause();
+    if (activeDemoSession && !replayVideo.hidden) {
+      if (replayVideo.paused) {
+        const end = replayDuration() || activeDemoSession.duration;
+        if (replayVideo.currentTime >= end - 0.05) replayVideo.currentTime = 0;
+        replayVideo.play().catch(() => {});
+      } else replayVideo.pause();
+      syncDemoReplay();
+      return;
+    }
+    // 逐帧回放（真实录制）：播放器自己驱动进度和图标
+    player.toggle();
+    setPlayIcon(player.playing);
   });
   $('replay-seek').addEventListener('input', (event) => {
     if (!activeDemoSession) return;
-    const duration = Math.min(activeDemoSession.duration, replayVideo.duration || activeDemoSession.duration);
+    const duration = replayDuration() || activeDemoSession.duration;
     replayVideo.currentTime = (Number(event.target.value) / 1000) * duration;
     syncDemoReplay();
   });
@@ -2890,15 +3576,41 @@ function bindEvents() {
     toast(added ? '已收藏该回放' : '已取消收藏');
   });
   $('correct-back').addEventListener('click', () => navigate('#/history'));
-  $('clip-prev').addEventListener('click', (event) => {
-    const id = event.currentTarget.dataset.id;
-    if (id) navigate(`#/correct/${id}`);
-    else stepSession(-1);
+
+  // 分段条：点哪一格就跳到哪一段的对应位置
+  $('error-ribbon').addEventListener('click', (event) => {
+    const block = event.target.closest('.ribbon-block');
+    if (!block) return;
+    const cell = event.target.closest('.ribbon-cell');
+    const time = Number(cell?.dataset.t ?? block.dataset.start);
+    if (!Number.isFinite(time)) return;
+    seekReplay(time, true);
+    centerStrip(Number(block.dataset.seg) || 0, 0);
+    dismissIdle();
   });
-  $('clip-next').addEventListener('click', (event) => {
-    const id = event.currentTarget.dataset.id;
-    if (id) navigate(`#/correct/${id}`);
-    else stepSession(1);
+
+  // 片段轮播的左右箭头：逐段切换，视频跟着跳到该段起点
+  $$('#correct-carousel .rec-arrow').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!replaySegments.length) return;
+      const step = Number(button.dataset.dir) || 1;
+      const total = replaySegments.length;
+      const next = ((stripIndex + step) % total + total) % total;
+      seekReplay(segStart(replaySegments[next]), true);
+      centerStrip(next, step);
+      dismissIdle();
+    });
+  });
+
+  // 全屏视频 ⇄ 左视频右骨骼 的分屏
+  $('replay-mode').addEventListener('click', () => {
+    setReplayMode(!$('replay-root').classList.contains('is-split'));
+  });
+  $('replay-cam-retry').addEventListener('click', openReplayCam);
+
+  // 鼠标一动就把控件叫回来（播放中静止 2.4s 会淡出）
+  ['pointermove', 'pointerdown', 'wheel'].forEach((type) => {
+    $('replay-main').addEventListener(type, dismissIdle, { passive: true });
   });
 
   $$('.topnav a[data-scroll="contact"]').forEach((link) => {
@@ -2973,11 +3685,44 @@ function bindEvents() {
     toast(`已添加好友 ${name}`);
   });
 
+  // 首页推荐：横向堆叠轮播（箭头翻页 + 左右拖拽）
+  // 只要手动翻过页，就先按住自动轮播（冷却 8s），否则自动轮播会在两下点击之间多走一张
+  $$('#home-carousel [data-dir]').forEach((button) => {
+    button.addEventListener('click', () => {
+      holdRecAuto();
+      moveRec(Number(button.dataset.dir) || 1);
+    });
+  });
+  const recStage = $('home-carousel-track');
+  const recBox = $('home-carousel');
+  let recDragFrom = null;
+  // 悬停整个轮播（含两侧箭头）都暂停，指针在箭头上时也不能继续自动翻页
+  recBox.addEventListener('pointerenter', stopRecAuto);
+  recBox.addEventListener('pointerleave', () => {
+    if (!recResumeTimer) startRecAuto();
+  });
+  recStage.addEventListener('pointerdown', (event) => {
+    holdRecAuto();
+    recDragFrom = { x: event.clientX, y: event.clientY };
+  });
+  recStage.addEventListener('pointerup', (event) => {
+    if (!recDragFrom) return;
+    const dx = event.clientX - recDragFrom.x;
+    recDragFrom = null;
+    // 横向轮播只认左右拖：往左拖 = 下一张
+    if (Math.abs(dx) < 40) return;
+    recDragMovedAt = Date.now();
+    moveRec(dx < 0 ? 1 : -1);
+  });
+  recStage.addEventListener('pointerleave', () => {
+    recDragFrom = null;
+  });
+
   // 轮播 / 胶片条左右翻页
-  $$('.carousel, .filmstrip').forEach((container) => {
-    const track = container.querySelector('.carousel__track, .filmstrip__track');
+  $$('.filmstrip').forEach((container) => {
+    const track = container.querySelector('.filmstrip__track');
     if (!track) return;
-    $$('.carousel__arrow, .filmstrip__nav', container).forEach((button) => {
+    $$('.filmstrip__nav', container).forEach((button) => {
       button.addEventListener('click', () => {
         const direction = Number(button.dataset.dir) || 1;
         const step = Math.max(track.clientWidth * 0.8, 240);
@@ -2988,7 +3733,19 @@ function bindEvents() {
 
   window.addEventListener('hashchange', applyRoute);
   window.addEventListener('resize', () => {
+    if (state.route === 'correct') {
+      syncDockHeight();
+      layoutStack(stripCards, stripIndex, 0, STRIP_LEVELS);
+      updateRibbonHead(replayTime());
+    }
     updateSegProgress();
+    // 扇形的位置和大小都按舞台尺寸算，窗口一变要重算（防抖，拖窗口时别狂排布）
+    if (state.route !== 'classes' || state.category !== 'all') return;
+    if (arcRelayoutTimer) window.clearTimeout(arcRelayoutTimer);
+    arcRelayoutTimer = window.setTimeout(() => {
+      arcRelayoutTimer = 0;
+      updateArc();
+    }, 140);
   });
 }
 
@@ -3028,7 +3785,6 @@ function init() {
   syncIsland();
   renderFilmstrip();
   renderErrorRibbon(null);
-  updateSidePreviews();
   setConn(false, '未连接');
 
   applyRoute();
@@ -3036,6 +3792,9 @@ function init() {
   hydrateLocalCourses();
   refreshSessions(false);
   requestAnimationFrame(overlayLoop);
+
+  // 兜底：即使路由回调没被触发（内嵌预览等环境），进入页也一定在 3s 后自动进场
+  if (parseRoute().name === 'cover') scheduleCoverAutoEnter();
 }
 
 window.addEventListener('beforeunload', () => {

@@ -6,7 +6,11 @@
   <meta name="theme-color" content="#0f1512" />
   <meta name="description" content="DANCE+ · 舞蹈学习助手：教学视频切片、摄像头实时骨架对比、练习录制与纠错回放。" />
   <title>DANCE+ · 舞蹈学习助手</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="preconnect" href="https://trae-api-cn.mchost.guru" />
+  <!-- 封面图预加载：进入页面即解码，避免淡入时出现空白帧 -->
+  <link rel="preload" as="image" href="assets/media/chinese-cover.jpg" />
+  <link rel="preload" as="image" href="assets/media/ballet-cover.jpg" />
+  <link rel="stylesheet" href="css/style.css?v=20261116z" />
 </head>
 <body>
 
@@ -24,15 +28,26 @@
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l1 12.2h9L17.5 7"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4.5 16.5V19a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2.5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h3.2l2 2.4H19a2 2 0 0 1 2 2v6.6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+  <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.2" y="4.6" width="17.6" height="14.8" rx="3.4"/><path d="M9.6 4.9v14.2"/></symbol>
   <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.5 13.9 9l5.6 2-5.6 2L12 18.5 10.1 13 4.5 11l5.6-2L12 3.5Z"/></symbol>
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
   <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m0 0-6-6m6 6-6 6"/></symbol>
+  <!-- 播放 / 暂停：实心图形，靠 fill 呈现，和线性图标区分开 -->
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M8.4 5.32c0-.83.9-1.34 1.61-.92l8.9 5.28a1.07 1.07 0 0 1 0 1.84l-8.9 5.28c-.71.42-1.61-.09-1.61-.92Z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M7.4 5.2h3.3v13.6H7.4zM13.3 5.2h3.3v13.6h-3.3z"/></symbol>
+  <!-- 分屏：左视频 + 右摄像头 -->
+  <symbol id="i-split" viewBox="0 0 24 24"><rect x="2.8" y="5.2" width="11.4" height="13.6" rx="2.6"/><rect x="16.4" y="5.2" width="4.8" height="13.6" rx="2"/><path d="M8.5 10.4v3.2"/></symbol>
+  <!-- 全屏：四角展开 -->
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9.4 4.4H4.4v5M14.6 4.4h5v5M14.6 19.6h5v-5M9.4 19.6h-5v-5"/></symbol>
 </svg>
 
 <!-- ======================= 封面 ======================= -->
 <section class="cover is-active" id="view-cover" data-view="cover">
-  <div class="cover__photo" role="img" aria-label="舞者在工作室中起舞"></div>
-  <div class="cover__veil"></div>
+  <!-- 背景图：沿用原有的封面主视觉，整个页面生命周期内固定常驻，不切换、不缩放、不替换。
+       人物即照片中的舞者，通过 background-position 精确落在画面正中。 -->
+  <div class="cover__bg" role="img" aria-label="舞者在工作室中起舞"></div>
+  <div class="cover__veil" aria-hidden="true"></div>
   <div class="cover__texture" aria-hidden="true"></div>
 
   <header class="cover__top">
@@ -49,7 +64,7 @@
   </div>
 
   <div class="cover__right">
-    <h1 class="cover__headline">FEEL<br />THE RHYTHM</h1>
+    <h1 class="cover__headline"><span class="cover__line">FEEL</span><span class="cover__line">THE RHYTHM</span></h1>
     <p class="cover__sub">Let's Discover Dance Together!</p>
     <div class="cover__bottom">
       <div class="cover__thumbs" id="cover-thumbs">
@@ -147,24 +162,28 @@
       <section class="view" id="view-home" data-view="home">
         <div class="page">
           <header class="page__head">
-            <div>
+            <div class="page__head-text">
               <p class="eyebrow">YOUR DAILY PRACTICE</p>
-              <h2>Recommended for you</h2>
+              <div class="page__title">
+                <h2>Recommended for you</h2>
+                <button class="folder-btn icon-tip icon-tip--below" id="home-refresh" type="button"
+                  aria-label="刷新视频库" data-tip="刷新视频库">
+                  <svg><use href="#i-folder"/></svg>
+                </button>
+              </div>
               <p class="lede" id="home-sub">从教学视频库开始今天的练习</p>
             </div>
-            <button class="btn btn--soft" id="home-refresh" type="button">刷新视频库</button>
           </header>
 
-          <div class="carousel" id="home-carousel">
-            <button class="carousel__arrow" type="button" data-dir="-1" aria-label="向左浏览">
+          <!-- 环形扇面轮播：中心卡最大，其余卡片沿圆弧向上/向下旋转排布 -->
+          <div class="rec" id="home-carousel">
+            <button class="rec-arrow rec-arrow--prev" type="button" data-dir="-1" aria-label="上一张课程">
               <svg><use href="#i-left"/></svg>
             </button>
-            <div class="carousel__track" id="home-carousel-track">
-              <div class="card-skeleton"></div>
-              <div class="card-skeleton"></div>
-              <div class="card-skeleton"></div>
+            <div class="rec-stage" id="home-carousel-track">
+              <div class="rec-skeleton"></div>
             </div>
-            <button class="carousel__arrow" type="button" data-dir="1" aria-label="向右浏览">
+            <button class="rec-arrow rec-arrow--next" type="button" data-dir="1" aria-label="下一张课程">
               <svg><use href="#i-right"/></svg>
             </button>
           </div>
@@ -178,18 +197,6 @@
             <svg class="upload-card__arrow"><use href="#i-arrow"/></svg>
           </button>
 
-          <div class="home-bottom">
-            <form class="search-pill" id="search-form" role="search">
-              <span class="search-pill__icon"><svg><use href="#i-mic"/></svg></span>
-              <input id="search-input" type="search" autocomplete="off" placeholder="搜索教学视频、课程或风格…" aria-label="搜索教学视频" />
-              <button class="search-pill__go" type="submit">搜索</button>
-            </form>
-            <button class="upload-square" id="upload-square" type="button" aria-label="上传教学视频">
-              <svg><use href="#i-upload"/></svg>
-            </button>
-          </div>
-          <div class="search-results" id="search-results"></div>
-          <p class="status-line" id="library-status">正在连接后端…</p>
         </div>
       </section>
 
@@ -199,11 +206,19 @@
           <aside class="cat-rail">
             <h3>Categories</h3>
             <div class="cat-list" id="category-list" role="list"></div>
+            <div class="cat-rail__foot">
+              <!-- 课程页里「个人区」从导航搬到分类面板底部（JS 移动 .rail__foot 节点） -->
+              <div class="cat-rail__profile" id="classes-profile-slot"></div>
+              <button class="rail-trigger icon-tip icon-tip--above" id="classes-rail-trigger" type="button"
+                aria-controls="rail" aria-expanded="false" aria-label="展开学习导航" data-tip="学习导航">
+                <svg><use href="#i-sidebar"/></svg>
+              </button>
+            </div>
           </aside>
 
           <div class="classes__stage">
             <img class="classes__bg" id="classes-bg" alt=""
-              src="assets/media/hero-01-classes-studio.jpg"
+              src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=bright%20minimal%20dance%20studio%20interior%20with%20wooden%20floor%20and%20large%20mirrors%2C%20soft%20daylight%2C%20empty%20room%2C%20architectural%20photography&image_size=landscape_16_9"
               loading="lazy" />
             <div class="classes__wash" aria-hidden="true"></div>
             <div class="classes__hint">
@@ -213,14 +228,14 @@
             </div>
 
             <div class="arc" id="class-arc" hidden>
-              <button class="arc__nav arc__nav--prev" type="button" data-arc-dir="-1" aria-label="上一个精选课程">
-                <svg><use href="#i-left"/></svg>
-              </button>
               <div class="arc__stage" id="arc-stage"></div>
-              <button class="arc__nav arc__nav--next" type="button" data-arc-dir="1" aria-label="下一个精选课程">
-                <svg><use href="#i-right"/></svg>
-              </button>
               <div class="arc__footer">
+                <button class="arc__nav" type="button" data-arc-dir="-1" aria-label="上一个精选课程">
+                  <svg><use href="#i-left"/></svg>
+                </button>
+                <button class="arc__nav" type="button" data-arc-dir="1" aria-label="下一个精选课程">
+                  <svg><use href="#i-right"/></svg>
+                </button>
                 <div class="arc__dots" id="arc-dots"></div>
                 <span class="arc__counter" id="arc-counter">01 / 07</span>
               </div>
@@ -431,22 +446,22 @@
           <div class="about-grid">
             <figure class="about-card about-card--wide">
               <img alt="用手机录制舞蹈练习" loading="lazy"
-                src="assets/media/hero-02-recording-tripod.jpg" />
+                src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=close%20up%20of%20a%20smartphone%20on%20a%20tripod%20recording%20a%20dancer%20in%20a%20bright%20studio%2C%20soft%20natural%20light%2C%20shallow%20depth%20of%20field&image_size=landscape_16_9" />
               <figcaption><b>一块屏幕，两种视角</b><span>教学视频与你的摄像头画面实时同屏，动作差异一眼可见。</span></figcaption>
             </figure>
             <figure class="about-card">
               <img alt="骨骼姿态分析可视化" loading="lazy"
-                src="assets/media/hero-03-neon-pose.jpg" />
+                src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=abstract%20green%20neon%20skeleton%20pose%20lines%20overlaid%20on%20a%20dancer%20silhouette%2C%20dark%20background%2C%20technology%20visualization&image_size=landscape_16_9" />
               <figcaption><b>33 个关键点</b><span>MediaPipe 实时推理，骨架与人物剪影同时叠加。</span></figcaption>
             </figure>
             <figure class="about-card">
               <img alt="一起跳舞的年轻人" loading="lazy"
-                src="assets/media/hero-04-group-dance.jpg" />
+                src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=group%20of%20young%20people%20dancing%20together%20in%20a%20studio%2C%20joyful%2C%20warm%20light%2C%20candid%20photography&image_size=landscape_16_9" />
               <figcaption><b>为学习者设计</b><span>7 秒切片、五档倍速、全部片段自动循环，跟得上才算学会。</span></figcaption>
             </figure>
             <figure class="about-card about-card--wide">
               <img alt="动作分析界面" loading="lazy"
-                src="assets/media/hero-05-analysis-dashboard.jpg" />
+                src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=laptop%20on%20a%20desk%20showing%20a%20motion%20analysis%20dashboard%2C%20dance%20studio%20background%2C%20evening%20light&image_size=landscape_16_9" />
               <figcaption><b>录下来，再纠正</b><span>练习过程自动录制，回放时把教学轮廓映射到你的身上。</span></figcaption>
             </figure>
           </div>
@@ -524,53 +539,70 @@
 
       <!-- ---------- 纠错回放 ---------- -->
       <section class="view view--stage" id="view-correct" data-view="correct">
-        <div class="replay">
-          <div class="replay__side">
-            <button class="replay-thumb" id="clip-prev" type="button">
-              <img id="clip-prev-img" alt="" />
-              <span>上一条</span>
-            </button>
-            <button class="replay-thumb" id="clip-next" type="button">
-              <img id="clip-next-img" alt="" />
-              <span>下一条</span>
-            </button>
-          </div>
+        <div class="replay is-cinema" id="replay-root">
+          <div class="replay__main" id="replay-main">
+            <div class="replay__stage" id="replay-stage">
+              <div class="replay__lane">
+                <video id="replay-video" class="replay-video" playsinline preload="metadata" hidden></video>
+                <canvas id="replay-canvas"></canvas>
+                <span class="replay__seg-tag" id="replay-seg-tag">第 1 段</span>
+              </div>
 
-          <div class="replay__main">
+              <!-- 分屏模式：右侧摄像头 + 骨骼提取窗口 -->
+              <aside class="replay-cam" id="replay-cam" hidden>
+                <video id="replay-cam-video" class="replay-cam__video mirrored" autoplay muted playsinline></video>
+                <canvas id="replay-cam-overlay" class="replay-cam__overlay mirrored"></canvas>
+                <span class="replay-cam__tag">YOU</span>
+                <p class="replay-cam__note" id="replay-cam-note">正在打开摄像头…</p>
+                <button class="replay-cam__retry" id="replay-cam-retry" type="button" hidden>重试连接</button>
+              </aside>
+            </div>
+
             <div class="replay__top">
               <button class="glass-btn" id="correct-back" type="button" aria-label="返回">
                 <svg><use href="#i-left"/></svg>
               </button>
               <span class="replay-status" id="replay-status">未选择回放</span>
+              <button class="replay__mode" id="replay-mode" type="button" aria-pressed="false"
+                aria-label="切换全屏视频 / 骨骼分屏" title="切换全屏视频 / 骨骼分屏">
+                <svg><use href="#i-split"/></svg>
+              </button>
             </div>
-            <video id="replay-video" class="replay-video" playsinline preload="metadata" hidden></video>
-            <canvas id="replay-canvas"></canvas>
+
             <button class="heart-btn heart-btn--canvas" id="replay-fav" type="button" aria-label="收藏回放" aria-pressed="false">
               <svg><use href="#i-heart"/></svg>
             </button>
           </div>
 
-          <div class="replay__dock">
-            <div class="error-ribbon" id="error-ribbon" aria-label="动作跟随度"></div>
-            <div class="error-legend">
-              <span><i class="ok"></i>跟随良好</span>
-              <span><i class="bad"></i>需要纠正</span>
+          <div class="replay__dock" id="replay-dock">
+            <!-- 跟随度分段条：每块 = 一个切片，块内小格 = 该段的跟随情况，点哪跳哪 -->
+            <div class="replay-ribbon" id="error-ribbon" role="group"
+              aria-label="动作跟随度分段条，点击可跳转到对应片段"></div>
+
+            <div class="replay-meta">
+              <div class="error-legend">
+                <span><i class="ok"></i>跟随良好</span>
+                <span><i class="bad"></i>需要纠正</span>
+              </div>
               <b id="match-score">--</b>
             </div>
 
             <div class="dock-row">
-              <button class="circle-btn" id="replay-toggle" type="button" aria-label="播放或暂停">播放</button>
+              <button class="circle-btn circle-btn--icon" id="replay-toggle" type="button" aria-label="播放">
+                <svg><use href="#i-play"/></svg>
+              </button>
               <input class="seek" type="range" id="replay-seek" min="0" max="1000" value="0" step="1" aria-label="回放进度" />
               <span class="dock-time" id="replay-time">00:00 / 00:00</span>
               <label class="chip-check"><input type="checkbox" id="replay-compare" checked /><span>教学轮廓</span></label>
             </div>
 
-            <div class="filmstrip" id="correct-carousel">
-              <button class="filmstrip__nav" type="button" data-dir="-1" aria-label="向左">
+            <!-- 片段轮播：复用首页那套分层堆叠算法，左右箭头逐段切换 -->
+            <div class="replay-strip" id="correct-carousel">
+              <button class="rec-arrow rec-arrow--prev" type="button" data-dir="-1" aria-label="上一段">
                 <svg><use href="#i-left"/></svg>
               </button>
-              <div class="filmstrip__track" id="correct-filmstrip"></div>
-              <button class="filmstrip__nav" type="button" data-dir="1" aria-label="向右">
+              <div class="rec-stage replay-strip__stage" id="correct-filmstrip"></div>
+              <button class="rec-arrow rec-arrow--next" type="button" data-dir="1" aria-label="下一段">
                 <svg><use href="#i-right"/></svg>
               </button>
             </div>
@@ -579,6 +611,24 @@
       </section>
 
     </main>
+
+    <!-- 底部停靠区：与左侧导航栏底边齐平（独立于滚动区，始终贴底） -->
+    <div class="home-dock">
+      <div class="home-dock__inner">
+        <p class="status-line" id="library-status">正在连接后端…</p>
+        <div class="search-results" id="search-results"></div>
+        <div class="home-bottom">
+          <form class="search-pill" id="search-form" role="search">
+            <span class="search-pill__icon"><svg><use href="#i-mic"/></svg></span>
+            <input id="search-input" type="search" autocomplete="off" placeholder="搜索教学视频、课程或风格…" aria-label="搜索教学视频" />
+            <button class="search-pill__go" type="submit">搜索</button>
+          </form>
+          <button class="upload-square" id="upload-square" type="button" aria-label="上传教学视频">
+            <svg><use href="#i-upload"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -614,6 +664,6 @@
 
 <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/app.js?v=20261116z"></script>
 </body>
 </html>
