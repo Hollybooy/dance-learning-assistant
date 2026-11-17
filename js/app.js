@@ -788,11 +788,27 @@ async function openRouteClass(videoId) {
 
 async function selectVideo(meta) {
   // 内置课程已导入后端（backendId）：改用后端视频流——骨架、掩码与教学画面
-  // 时间轴一致，骨骼对比、人物阴影、重合度全部可用；后端就绪才替换
+  // 时间轴一致，骨骼对比、人物阴影、重合度全部可用。
+  // 不能只依赖预加载列表：打开课程可能早于 loadLibrary 完成，此时要主动查询，
+  // 否则会退回本地未转码素材（部分编码在浏览器里表现为黑屏）。
   if (meta.local && meta.backendId) {
-    const remote = (state.remoteVideos || []).find(
+    let remote = (state.remoteVideos || []).find(
       (video) => video.id === meta.backendId && video.pose_status === 'ready'
     );
+    if (!remote) {
+      try {
+        const fresh = await api.getVideo(meta.backendId);
+        if (fresh?.pose_status === 'ready') {
+          remote = fresh;
+          state.remoteVideos = [
+            fresh,
+            ...(state.remoteVideos || []).filter((video) => video.id !== fresh.id),
+          ];
+        }
+      } catch {
+        // 后端不可用：回退原来的本地静态播放
+      }
+    }
     if (remote) {
       meta = {
         ...remote,

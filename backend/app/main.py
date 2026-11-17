@@ -56,4 +56,13 @@ async def health():
 app.mount("/media", StaticFiles(directory=DATA_DIR), name="media")
 
 # 前端静态页面（放在最后，避免覆盖 /api 路由）
-app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+class _NoCacheStaticFiles(StaticFiles):
+    """前端脚本改动频繁：禁止浏览器强缓存旧 JS，每次都向服务端校验 ETag。"""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", _NoCacheStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
