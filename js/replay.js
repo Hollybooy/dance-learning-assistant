@@ -63,9 +63,8 @@ export class ReplayPlayer {
       const ratio = Number(seekBar.value) / 1000;
       this.seek(ratio * this.duration);
     });
-    playButton.addEventListener('click', () => {
-      if (playButton.dataset.mode !== 'video') this.toggle();
-    });
+    // 播放按钮不在这里绑定：页面需要区分「真实录制」与「演示视频」两种回放，
+    // 统一由 app.js 处理（这里再绑一次会导致一次点击 play→pause 互相抵消）
   }
 
   async load(session) {
@@ -327,6 +326,7 @@ export class ReplayPlayer {
     if (this.playhead >= this.duration) {
       this.playing = false;
       this._syncBar();
+      this.onState?.(false); // 播完把外部播放图标切回「播放」
       return;
     }
     requestAnimationFrame(this._tick);
