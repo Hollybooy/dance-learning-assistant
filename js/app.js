@@ -58,6 +58,7 @@ const DEFAULT_SETTINGS = {
   countdown: 3,
   autoplayNext: true,
   dockDelay: 1500,
+  voiceTips: true,
 };
 
 const state = {
@@ -331,6 +332,7 @@ async function applyRoute() {
   }
 
   state.route = name;
+  if (name !== 'learning') hideCoachTip(); // 离开教学页不再朗读旧提示
 
   // 进入页：停留 3 秒自动进场；其他页面清掉计时器
   if (name === 'cover') scheduleCoverAutoEnter();
@@ -2039,6 +2041,46 @@ function tipTextFor(entry) {
   return `${name}再抬高一点点就贴合了`;
 }
 
+/* 小教练语音播报：用浏览器自带的 speechSynthesis，不需要后端或联网。
+   系统语音列表可能异步加载，voiceschanged 时缓存一次中文声音。 */
+let coachVoice = null;
+function resolveCoachVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((voice) => /^zh[-_]?cn/i.test(voice.lang)) ||
+    voices.find((voice) => /^zh/i.test(voice.lang)) ||
+    null
+  );
+}
+if ('speechSynthesis' in window && window.speechSynthesis.addEventListener) {
+  window.speechSynthesis.addEventListener('voiceschanged', () => {
+    coachVoice = resolveCoachVoice();
+  });
+}
+
+function speakCoachTip(text) {
+  if (!state.settings.voiceTips) return;
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+  const synth = window.speechSynthesis;
+  try {
+    synth.cancel(); // 新提示打断上一条，避免多条叠加
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'zh-CN';
+    utterance.rate = 1.08;
+    utterance.pitch = 1;
+    const voice = coachVoice || resolveCoachVoice();
+    if (voice) utterance.voice = voice;
+    synth.speak(utterance);
+  } catch {
+    // 浏览器不支持或尚未获得播放权限时，保留文字提示即可
+  }
+}
+
+function stopCoachVoice() {
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+}
+
 function showCoachTip(text) {
   const tip = $('coach-tip');
   if (!tip) return;
@@ -2047,6 +2089,7 @@ function showCoachTip(text) {
   // 强制回流，保证 hidden 移除后过渡动画生效
   void tip.offsetWidth;
   tip.classList.add('is-show');
+  speakCoachTip(text);
   clearTimeout(tipHideTimer);
   tipHideTimer = setTimeout(() => {
     tip.classList.remove('is-show');
@@ -2062,6 +2105,7 @@ function hideCoachTip() {
   clearTimeout(tipHideTimer);
   tip.classList.remove('is-show');
   tip.hidden = true;
+  stopCoachVoice();
 }
 
 // 调试钩子：便于自动化验证部位判定与文案方向（不参与业务逻辑）
@@ -3199,6 +3243,7 @@ function renderSettings() {
     },
     { key: 'skeleton', label: '默认显示骨架', type: 'toggle', value: state.settings.skeleton },
     { key: 'shadows', label: '默认显示人物阴影', type: 'toggle', value: state.settings.shadows },
+    { key: 'voiceTips', label: '小教练语音提示', type: 'toggle', value: state.settings.voiceTips !== false },
     {
       key: 'countdown',
       label: '录制倒计时',
@@ -3259,6 +3304,9 @@ function applySetting(key, rawValue) {
   } else if (key === 'shadows') {
     state.shadows = value;
     syncVisButtons();
+  } else if (key === 'voiceTips') {
+    syncVisButtons();
+    if (!value) stopCoachVoice();
   } else if (key === 'countdown') {
     $('countdown-select').value = String(value);
   } else if (key === 'dark') {
@@ -3477,6 +3525,10 @@ function bindEvents() {
     state.settings.shadows = state.shadows;
     saveSettings();
     syncVisButtons();
+  });
+  $('voice-toggle').addEventListener('click', () => {
+    applySetting('voiceTips', !state.settings.voiceTips);
+    toast(state.settings.voiceTips ? '已开启语音提示' : '已关闭语音提示');
   });
   $('countdown-select').addEventListener('change', (event) => {
     state.settings.countdown = Number(event.target.value) || 0;
@@ -3788,6 +3840,11 @@ function syncVisButtons() {
   const shadowBtn = $('shadow-toggle');
   shadowBtn.classList.toggle('is-on', state.shadows);
   shadowBtn.setAttribute('aria-pressed', String(state.shadows));
+
+  const voiceBtn = $('voice-toggle');
+  const voiceOn = state.settings.voiceTips !== false;
+  voiceBtn.classList.toggle('is-on', voiceOn);
+  voiceBtn.setAttribute('aria-pressed', String(voiceOn));
 }
 
 /* ------------------------------------------------------------------ 启动 */
