@@ -442,9 +442,38 @@ function initRail() {
       const item = head.closest('.rail-item');
       const open = item.classList.toggle('is-open');
       head.setAttribute('aria-expanded', String(open));
+      slideRailBody(item, open);
     });
   });
   $$('.rail-item').forEach((item) => item.classList.add('is-open'));
+}
+
+/* 折叠体常驻 flex，靠 max-height 过渡开合：展开时先量出真实高度，
+   动画结束再把高度交还给 CSS，这样列表之后变长也不会被截断 */
+function slideRailBody(item, open) {
+  const body = item.querySelector('.rail-item__body');
+  if (!body) return;
+  clearTimeout(body._railTimer);
+  body.style.overflow = 'hidden';
+  if (open) {
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    const settle = () => {
+      if (!item.classList.contains('is-open')) return;
+      body.style.maxHeight = '';
+      body.style.overflow = '';
+    };
+    body.addEventListener('transitionend', function onEnd(event) {
+      if (event.target !== body || event.propertyName !== 'max-height') return;
+      body.removeEventListener('transitionend', onEnd);
+      settle();
+    });
+    // 兜底：过渡被中断或系统关闭动效时同样要解绑高度
+    body._railTimer = setTimeout(settle, 320);
+  } else {
+    body.style.maxHeight = `${body.scrollHeight}px`;
+    void body.offsetHeight;
+    body.style.maxHeight = '0px';
+  }
 }
 
 /* ------------------------------------------------------------------ 视频库 */

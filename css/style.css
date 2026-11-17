@@ -488,12 +488,20 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .rail-item__head .chev { width: 17px; height: 17px; opacity: 0.55; transition: transform 0.25s var(--ease); }
 .rail-item.is-open .chev { transform: rotate(180deg); }
 .rail-item__body {
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 4px 10px;
+  padding: 0 4px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.26s var(--ease), padding 0.26s var(--ease), opacity 0.18s ease;
 }
-.rail-item.is-open > .rail-item__body { display: flex; }
+.rail-item.is-open > .rail-item__body {
+  max-height: none;
+  padding: 6px 4px 10px;
+  opacity: 1;
+}
 
 .rail-row {
   display: flex;
