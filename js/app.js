@@ -68,6 +68,7 @@ const DEFAULT_SETTINGS = {
 
 const state = {
   videos: [],
+  remoteVideos: [],
   localCourses: buildLocalCourses(),
   video: null,
   segments: [],
@@ -523,15 +524,26 @@ function renderCategories() {
 
 async function loadLibrary({ silent = false } = {}) {
   let remote = [];
+  let libraryLoaded = false;
   try {
     const { items } = await api.listVideos();
     remote = items || [];
-    $('library-status').textContent = `已载入 ${state.localCourses.length} 个内置课程 · 视频库 ${remote.length} 个上传视频`;
+    libraryLoaded = true;
   } catch (error) {
     $('library-status').textContent = `离线预览模式：后端未连接（${error.message}），内置课程仍可使用`;
     $('history-list').innerHTML = '<p class="empty-hint">后端未连接，无法读取练习记录</p>';
   }
-  state.videos = [...state.localCourses, ...remote];
+  // 完整远端列表：内置课程关联（backendId）时从这里取后端数据源
+  state.remoteVideos = remote;
+  // 视频库里隐藏已被内置课程关联的同内容视频，避免出现两份
+  const linked = new Set(
+    state.localCourses.map((course) => course.backendId).filter(Boolean)
+  );
+  const shown = remote.filter((video) => !linked.has(video.id));
+  state.videos = [...state.localCourses, ...shown];
+  if (libraryLoaded) {
+    $('library-status').textContent = `已载入 ${state.localCourses.length} 个内置课程 · 视频库 ${shown.length} 个上传视频`;
+  }
   renderHome();
   renderClassAlbums();
   renderRail();
@@ -775,6 +787,23 @@ async function openRouteClass(videoId) {
 }
 
 async function selectVideo(meta) {
+  // 内置课程已导入后端（backendId）：改用后端视频流——骨架、掩码与教学画面
+  // 时间轴一致，骨骼对比、人物阴影、重合度全部可用；后端就绪才替换
+  if (meta.local && meta.backendId) {
+    const remote = (state.remoteVideos || []).find(
+      (video) => video.id === meta.backendId && video.pose_status === 'ready'
+    );
+    if (remote) {
+      meta = {
+        ...remote,
+        title: meta.title,
+        desc: meta.desc,
+        cover: meta.cover,
+        master: meta.master,
+        builtin: true,
+      };
+    }
+  }
   state.video = meta;
   state.segments = meta.segments || [];
   state.current = 0;
@@ -842,11 +871,13 @@ function renderDetail() {
     ? meta.master
       ? '内置课程'
       : '本地素材'
-    : meta.pose_status === 'ready'
-      ? '骨架已就绪'
-      : meta.pose_status === 'failed'
-        ? '骨架失败'
-        : '分析中';
+    : meta.builtin && meta.pose_status === 'ready'
+      ? '内置课程 · 骨架就绪'
+      : meta.pose_status === 'ready'
+        ? '骨架已就绪'
+        : meta.pose_status === 'failed'
+          ? '骨架失败'
+          : '分析中';
   $('detail-desc').textContent = meta.local
     ? `${meta.desc || '内置教学素材。'}${
         meta.master
