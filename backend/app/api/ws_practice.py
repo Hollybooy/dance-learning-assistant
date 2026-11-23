@@ -41,6 +41,11 @@ router = APIRouter()
 async def practice_socket(ws: WebSocket) -> None:
     await ws.accept()
 
+    # 每次新会话重置上一段的检测 ROI 与阴影缓存，避免沿用旧画面
+    reset_tracking = getattr(live_pose_engine, "reset_tracking", None)
+    if callable(reset_tracking):
+        reset_tracking()
+
     send_lock = asyncio.Lock()
     state: Dict[str, Any] = {
         "busy": False,

@@ -94,6 +94,11 @@ def ensure_onnx_pose_models() -> tuple[Path, Path]:
     return resolved["pose"], resolved["person"]
 
 
+def yolo_mask_model_path(imgsz: int = 640) -> Path:
+    override = os.getenv("DANCEMATE_YOLO_MODEL")
+    return Path(override).expanduser() if override else MODEL_DIR / f"yolo26n-seg-{imgsz}.onnx"
+
+
 def onnx_models_ready() -> bool:
     """两个 ONNX 模型是否已在本机，避免离线时自动切到 GPU 后端后首帧失败。"""
     for name, _url, env_key in _ONNX_MODELS.values():

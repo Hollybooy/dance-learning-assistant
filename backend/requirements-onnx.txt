@@ -1,6 +1,7 @@
 # 可选：ONNX Runtime GPU 推理后端
 # Windows 本地推荐 DirectML（无需安装 CUDA）：
 #   backend\.venv\Scripts\python.exe -m pip install -r requirements-onnx.txt
-# 安装后首次启用会自动下载两个模型（约 17MB）到 backend/models/
+# 显式设置 DANCEMATE_POSE_BACKEND=onnx 时会自动下载两个姿态模型（约 17MB）到 backend/models/
+# 人物阴影用的 YOLO26n-seg 需用 export_yolo_seg.py 单独导出（Ultralytics，AGPL-3.0，仅非商业用途）
 onnxruntime-directml>=1.24; sys_platform == "win32"
 onnxruntime-gpu>=1.20; sys_platform != "win32"

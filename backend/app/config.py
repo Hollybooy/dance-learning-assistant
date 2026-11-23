@@ -35,6 +35,13 @@ ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "dml").strip().lower()
 # ONNX 后端每隔多少帧重跑一次人体检测（中间帧沿用上一帧的 ROI，降低耗时）
 ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "2")))
 
+# 人物阴影来源：blazepose（与骨架同一次推理，默认）或 yolo（YOLO26n-seg）
+MASK_BACKEND = os.getenv("DANCEMATE_MASK_BACKEND", "yolo").strip().lower()
+
+# YOLO 分割模型输入尺寸与更新间隔（按帧计，中间帧复用上一张掩码）
+YOLO_IMGSZ = int(os.getenv("DANCEMATE_YOLO_IMGSZ", "640"))
+YOLO_MASK_INTERVAL = max(1, int(os.getenv("DANCEMATE_YOLO_MASK_INTERVAL", "3")))
+
 # 关键点可见度阈值
 POSE_MIN_VISIBILITY = float(os.getenv("DANCEMATE_POSE_MIN_VIS", "0.3"))
 

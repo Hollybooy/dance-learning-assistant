@@ -20,8 +20,8 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from ...config import ORT_DETECT_INTERVAL, ORT_PROVIDER
-from ..model_store import ensure_onnx_pose_models
+from ...config import MASK_BACKEND, ORT_DETECT_INTERVAL, ORT_PROVIDER, YOLO_IMGSZ, YOLO_MASK_INTERVAL
+from ..model_store import ensure_onnx_pose_models, yolo_mask_model_path
 from .mp_persondet import MPPersonDet
 from .mp_pose import MPPose
 from .ort_net import OrtNet
@@ -50,6 +50,9 @@ class OnnxPoseEngine:
         self._det: Optional[MPPersonDet] = None
         self._person: Optional[np.ndarray] = None
         self._since_detect = 0
+        self._masker = None
+        self._mask_png: Optional[bytes] = None
+        self._since_mask = 0
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=name)
         self.providers: List[str] = []
@@ -67,6 +70,15 @@ class OnnxPoseEngine:
             self._pose = MPPose(str(pose_path), net=pose_net)
             self.providers = pose_net.providers
             logger.info("ONNX 姿态模型已加载：%s", self.providers)
+
+            if MASK_BACKEND == "yolo" and self._with_segmentation:
+                mask_path = yolo_mask_model_path(YOLO_IMGSZ)
+                if mask_path.exists():
+                    from .yolo_seg import YoloSegMasker
+
+                    self._masker = YoloSegMasker(mask_path, imgsz=YOLO_IMGSZ, provider=self._provider)
+                else:
+                    logger.warning("未找到 YOLO 分割模型 %s，回退 BlazePose 掩码", mask_path)
 
     def _encode_mask(self, mask: Optional[np.ndarray]) -> Optional[bytes]:
         if mask is None:
@@ -98,10 +110,12 @@ class OnnxPoseEngine:
         height, width = frame_bgr.shape[:2]
         person = self._detect_person(frame_bgr)
         if person is None:
+            self._reset_mask()
             return None, None
         result = self._pose.infer(frame_bgr, person)
         if result is None:
             self._person = None  # 姿态失败，下一帧强制重新检测
+            self._reset_mask()
             return None, None
         _bbox, landmarks, _world, mask, _heatmap, _conf = result
         pose = [
@@ -113,7 +127,29 @@ class OnnxPoseEngine:
             ]
             for x, y, z, visibility, _presence in landmarks[:-6]
         ]
-        return pose, self._encode_mask(mask) if self._with_segmentation else None
+        if not self._with_segmentation:
+            return pose, None
+        if self._masker is None:
+            return pose, self._encode_mask(mask)
+        # YOLO 掩码较贵：按间隔更新，中间帧沿用上一张，避免每帧都多付推理时间
+        if self._mask_png is None or self._since_mask >= YOLO_MASK_INTERVAL:
+            fresh = self._masker.mask_png(frame_bgr, self.MASK_SIZE)
+            self._since_mask = 0
+            if fresh is not None:
+                self._mask_png = fresh
+        else:
+            self._since_mask += 1
+        return pose, self._mask_png
+
+    def _reset_mask(self) -> None:
+        self._mask_png = None
+        self._since_mask = 0
+
+    def reset_tracking(self) -> None:
+        """新的练习会话开始时清掉上一段的 ROI 与阴影缓存。"""
+        self._person = None
+        self._since_detect = 0
+        self._reset_mask()
 
     # ---------- 同步接口 ----------
     def estimate_sync_with_mask(self, frame_bgr: np.ndarray):

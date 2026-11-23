@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import numpy as np
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -25,9 +27,19 @@ logging.basicConfig(
 )
 
 
+def _warmup_pose_engine() -> None:
+    """提前加载模型并跑一帧，避免用户第一帧等 2 秒以上。"""
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    live_pose_engine.estimate_sync_with_mask(frame)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     ensure_dirs()
+    try:
+        await asyncio.to_thread(_warmup_pose_engine)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("dancemate.startup").exception("姿态引擎预热失败，首帧会稍慢")
     yield
     live_pose_engine.close()
 
