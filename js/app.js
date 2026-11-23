@@ -33,6 +33,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const FAV_KEY = 'danceplus_favorites_v1';
 const USER_KEY = 'danceplus_user_v1';
 const SETTINGS_KEY = 'danceplus_settings_v1';
+const PERF_KEY = 'danceplus_perf_hud_v1'; // 性能面板是调试项，单独存，避免沿用旧配置里的 true
 const FRIENDS_KEY = 'danceplus_friends_v1';
 const PROFILE_STATS_KEY = 'danceplus_profile_stats_v1';
 const PLAYBACK_RATES = [0.75, 0.9, 1, 1.25, 1.5];
@@ -59,6 +60,7 @@ const DEFAULT_SETTINGS = {
   autoplayNext: true,
   dockDelay: 1500,
   voiceTips: true,
+  showPerf: false,
 };
 
 const state = {
@@ -198,7 +200,12 @@ function saveUser() {
 function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    return { ...DEFAULT_SETTINGS, ...raw, autoplayNext: true };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...raw,
+      autoplayNext: true,
+      showPerf: localStorage.getItem(PERF_KEY) === '1',
+    };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -349,6 +356,7 @@ async function applyRoute() {
   shell.classList.toggle('is-immersive', STAGE_ROUTES.has(name));
   main.classList.toggle('is-stage', STAGE_ROUTES.has(name));
   markNav(name);
+  syncPerfHud();
   closeRail();
   main.scrollTop = 0;
 
@@ -1656,11 +1664,73 @@ function renderFavorite() {
   replayButton.setAttribute('aria-pressed', String(isFavSession));
 }
 
+/* -------------------------------------------------------------- 性能埋点 */
+
+const perf = { teach: 0, live: 0, replay: 0, dropped: 0, serverMs: 0, stages: null };
+let teachFpsHandle = 0;
+let teachFpsMode = '';
+
+function syncPerfHud() {
+  const hud = $('perf-hud');
+  if (hud) hud.hidden = !state.settings.showPerf || !STAGE_ROUTES.has(state.route);
+}
+
+function startTeachFps() {
+  if (teachFpsHandle) return;
+  const video = $('teach-video');
+  if (video.requestVideoFrameCallback) {
+    // requestVideoFrameCallback 统计的是实际送显帧，能区分「视频掉帧」与「屏幕刷新」
+    teachFpsMode = 'video';
+    const tick = () => {
+      perf.teach += 1;
+      teachFpsHandle = video.requestVideoFrameCallback(tick);
+    };
+    teachFpsHandle = video.requestVideoFrameCallback(tick);
+  } else {
+    teachFpsMode = 'raf';
+    const tick = () => {
+      perf.teach += 1;
+      teachFpsHandle = requestAnimationFrame(tick);
+    };
+    teachFpsHandle = requestAnimationFrame(tick);
+  }
+}
+
+function stopTeachFps() {
+  if (!teachFpsHandle) return;
+  if (teachFpsMode === 'video') $('teach-video')?.cancelVideoFrameCallback?.(teachFpsHandle);
+  else cancelAnimationFrame(teachFpsHandle);
+  teachFpsHandle = 0;
+  teachFpsMode = '';
+}
+
+function initPerfHud() {
+  window.setInterval(() => {
+    if (!state.settings.showPerf || !STAGE_ROUTES.has(state.route)) return;
+    $('perf-teach').textContent = `教学 ${perf.teach} fps`;
+    $('perf-live').textContent = `接收 ${perf.live} fps · 推理 ${Math.round(perf.serverMs)}ms`;
+    const stages = perf.stages;
+    $('perf-stage').textContent = stages
+      ? `解码 ${stages.decode_ms} · 骨架 ${stages.infer_ms} · 掩码 ${stages.mask_ms} ms`
+      : '分阶段耗时 --';
+    $('perf-drop').textContent = `丢帧 ${perf.dropped}/s`;
+    $('perf-replay').textContent = `回放 ${perf.replay} fps`;
+    perf.teach = 0;
+    perf.live = 0;
+    perf.replay = 0;
+    perf.dropped = 0;
+  }, 1000);
+}
+
 /* ------------------------------------------------------------------ 实时跟练 */
 
 const live = new LivePoseStream({
   video: cameraVideo,
-  onPose: ({ pose, mask, serverMs, rtt }) => {
+  onPose: ({ pose, mask, serverMs, rtt, stages, dropped }) => {
+    perf.live += 1;
+    perf.dropped += dropped;
+    perf.serverMs = serverMs;
+    perf.stages = stages;
     state.livePose = pose;
     state.liveMask = mask ?? null;
     $('latency-badge').textContent = `延时 ${Math.round(rtt)}ms · 推理 ${Math.round(serverMs)}ms`;
@@ -2191,6 +2261,7 @@ const player = new ReplayPlayer({
   playButton: $('replay-toggle'),
   getTeachFrames: getTeachFramesFor,
   onState: (playing) => setPlayIcon(playing),
+  onFrame: () => { perf.replay += 1; },
   getTeachMasks: async (videoId) => {
     if (!teachMaskFrames.has(videoId)) {
       let url = state.video?.id === videoId ? state.video?.masks_url : null;
@@ -3244,6 +3315,7 @@ function renderSettings() {
     { key: 'skeleton', label: '默认显示骨架', type: 'toggle', value: state.settings.skeleton },
     { key: 'shadows', label: '默认显示人物阴影', type: 'toggle', value: state.settings.shadows },
     { key: 'voiceTips', label: '小教练语音提示', type: 'toggle', value: state.settings.voiceTips !== false },
+    { key: 'showPerf', label: '显示性能面板（调试）', type: 'toggle', value: state.settings.showPerf === true },
     {
       key: 'countdown',
       label: '录制倒计时',
@@ -3307,6 +3379,9 @@ function applySetting(key, rawValue) {
   } else if (key === 'voiceTips') {
     syncVisButtons();
     if (!value) stopCoachVoice();
+  } else if (key === 'showPerf') {
+    localStorage.setItem(PERF_KEY, value ? '1' : '0');
+    syncPerfHud();
   } else if (key === 'countdown') {
     $('countdown-select').value = String(value);
   } else if (key === 'dark') {
@@ -3530,6 +3605,9 @@ function bindEvents() {
     applySetting('voiceTips', !state.settings.voiceTips);
     toast(state.settings.voiceTips ? '已开启语音提示' : '已关闭语音提示');
   });
+  $('teach-video').addEventListener('play', startTeachFps);
+  $('teach-video').addEventListener('pause', stopTeachFps);
+  $('teach-video').addEventListener('ended', stopTeachFps);
   $('countdown-select').addEventListener('change', (event) => {
     state.settings.countdown = Number(event.target.value) || 0;
     saveSettings();
@@ -3872,6 +3950,7 @@ function init() {
   renderFilmstrip();
   renderErrorRibbon(null);
   setConn(false, '未连接');
+  initPerfHud();
 
   applyRoute();
   loadLibrary();

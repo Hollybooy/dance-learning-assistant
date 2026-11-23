@@ -1,0 +1,6 @@
+# 可选：ONNX Runtime GPU 推理后端
+# Windows 本地推荐 DirectML（无需安装 CUDA）：
+#   backend\.venv\Scripts\python.exe -m pip install -r requirements-onnx.txt
+# 安装后首次启用会自动下载两个模型（约 17MB）到 backend/models/
+onnxruntime-directml>=1.24; sys_platform == "win32"
+onnxruntime-gpu>=1.20; sys_platform != "win32"

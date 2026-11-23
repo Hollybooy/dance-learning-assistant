@@ -1368,6 +1368,30 @@ body.is-home .home-dock { display: block; }
   white-space: nowrap;
 }
 
+/* 性能面板：只用于定位卡顿，不拦截任何交互 */
+.perf-hud {
+  position: fixed;
+  top: 78px;
+  right: 18px;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 168px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(8, 14, 11, 0.72);
+  border: 1px solid rgba(124, 240, 176, 0.32);
+  backdrop-filter: blur(12px);
+  color: #d8ffe9;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.perf-hud[hidden] { display: none; }
+.perf-hud b { color: #7cf0b0; font-size: 10px; letter-spacing: 0.08em; }
+.perf-hud span { white-space: nowrap; }
+
 .stage__arrow {
   position: absolute;
   top: 46%;

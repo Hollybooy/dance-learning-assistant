@@ -26,6 +26,15 @@ POSE_MODEL_COMPLEXITY = int(os.getenv("DANCEMATE_POSE_COMPLEXITY", "0"))
 # Tasks API 模型变体：lite / full
 POSE_MODEL_VARIANT = os.getenv("DANCEMATE_POSE_MODEL", "lite")
 
+# 推理后端：auto（有 ONNX Runtime 与模型时用 GPU，否则 MediaPipe）/ mediapipe / onnx
+POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "auto").strip().lower()
+
+# ONNX Runtime 执行提供程序：dml（Windows DirectML，默认）/ cuda / cpu
+ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "dml").strip().lower()
+
+# ONNX 后端每隔多少帧重跑一次人体检测（中间帧沿用上一帧的 ROI，降低耗时）
+ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "2")))
+
 # 关键点可见度阈值
 POSE_MIN_VISIBILITY = float(os.getenv("DANCEMATE_POSE_MIN_VIS", "0.3"))
 

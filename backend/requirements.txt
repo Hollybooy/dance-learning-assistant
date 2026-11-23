@@ -5,3 +5,5 @@ opencv-python-headless>=4.10
 mediapipe>=0.10.14
 numpy>=1.26,<3
 imageio-ffmpeg>=0.5
+# Windows 本地：DirectML 版 ONNX Runtime（GPU 推理，无需 CUDA）；Docker/Linux 跳过
+onnxruntime-directml>=1.24; sys_platform == "win32"

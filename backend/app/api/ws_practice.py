@@ -8,7 +8,7 @@
         {"type":"ping"}
     服务端 → 客户端
         {"type":"ready","record_fps":12,"server_ms":..}
-        {"type":"pose","pose":[[x,y,z,v],..]|null,"mask":"<灰度PNG base64>|null","server_ms":..,"dropped":n,"ts":..}
+        {"type":"pose","pose":[[x,y,z,v],..]|null,"mask":"<灰度PNG base64>|null","server_ms":..,"stages":{"decode_ms":..,"infer_ms":..,"mask_ms":..},"dropped":n,"ts":..}
         {"type":"record_started","session_id":..}
         {"type":"record_stopped","session":{...}}
         {"type":"pong"}
@@ -67,7 +67,7 @@ async def practice_socket(ws: WebSocket) -> None:
         state["busy"] = True
         try:
             started = time.perf_counter()
-            pose, mask = await live_pose_engine.estimate_jpeg_with_mask(data)
+            pose, mask, stages = await live_pose_engine.estimate_jpeg_with_mask_timed(data)
             # 漂移帧剔除 + 自适应平滑 + 丢帧补齐（实时显示与录制共用同一结果）
             pose = stabilizer.filter(pose)
             state["latest_pose"] = pose
@@ -80,6 +80,7 @@ async def practice_socket(ws: WebSocket) -> None:
                     # 人物分割掩码（灰度 PNG base64），前端着色绘制人物阴影
                     "mask": base64.b64encode(mask).decode("ascii") if mask else None,
                     "server_ms": round(server_ms, 1),
+                    "stages": stages,
                     "dropped": state["dropped"],
                     "ts": round(time.time(), 4),
                 }

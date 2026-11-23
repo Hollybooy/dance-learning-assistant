@@ -170,6 +170,7 @@ export class ReplayPlayer {
   _draw() {
     const { ctx, canvas } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    this.onFrame?.();
     ctx.fillStyle = '#070a0d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 

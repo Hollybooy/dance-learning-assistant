@@ -201,6 +201,7 @@ export class LivePoseStream {
         pose: message.pose,
         mask: this._latestMask ?? null,
         serverMs: message.server_ms ?? 0,
+        stages: message.stages ?? null,
         rtt,
         dropped: message.dropped ?? 0,
       });

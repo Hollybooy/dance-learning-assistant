@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import threading
 import time
@@ -19,8 +20,10 @@ from typing import List, Optional
 import cv2
 import numpy as np
 
-from ..config import POSE_MODEL_COMPLEXITY, POSE_MODEL_VARIANT
+from ..config import ORT_PROVIDER, POSE_BACKEND, POSE_MODEL_COMPLEXITY, POSE_MODEL_VARIANT
 from .model_store import ensure_pose_model
+
+logger = logging.getLogger("dancemate.pose")
 
 
 class PoseEngine:
@@ -174,6 +177,29 @@ class PoseEngine:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, self._estimate_jpeg_mask_sync, data)
 
+    async def estimate_jpeg_with_mask_timed(self, data: bytes):
+        """同 estimate_jpeg_with_mask，但附带解码/推理/掩码各阶段耗时（毫秒）。"""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, self._estimate_jpeg_mask_sync_timed, data)
+
+    def _estimate_jpeg_mask_sync_timed(self, data: bytes):
+        started = time.perf_counter()
+        frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        decoded = time.perf_counter()
+        if frame is None:
+            empty = {"decode_ms": round((decoded - started) * 1000, 1), "infer_ms": 0.0, "mask_ms": 0.0}
+            return None, None, empty
+        landmarks, result = self._detect(frame)
+        inferred = time.perf_counter()
+        pose = self._format_landmarks(landmarks) if landmarks else None
+        mask = self._encode_mask(result) if landmarks else None
+        encoded = time.perf_counter()
+        return pose, mask, {
+            "decode_ms": round((decoded - started) * 1000, 1),
+            "infer_ms": round((inferred - decoded) * 1000, 1),
+            "mask_ms": round((encoded - inferred) * 1000, 1),
+        }
+
     def _estimate_jpeg_mask_sync(self, data: bytes):
         frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
         if frame is None:
@@ -193,9 +219,32 @@ class PoseEngine:
             self._executor.shutdown(wait=False)
 
 
+def create_pose_engine(**kwargs):
+    """按 DANCEMATE_POSE_BACKEND 选择 MediaPipe 或 ONNX Runtime（GPU）实现。
+
+    auto：装了 onnxruntime 且两个 ONNX 模型都在本地时才走 GPU，否则回退 MediaPipe。
+    """
+    backend = POSE_BACKEND
+    if backend == "auto":
+        import importlib.util
+
+        from .model_store import onnx_models_ready
+
+        backend = "onnx" if importlib.util.find_spec("onnxruntime") and onnx_models_ready() else "mediapipe"
+    if backend == "onnx":
+        from .onnx_pose import OnnxPoseEngine
+
+        logger.info("姿态推理后端：ONNX Runtime（provider=%s）", ORT_PROVIDER)
+        return OnnxPoseEngine(**kwargs)
+    logger.info("姿态推理后端：MediaPipe（CPU）")
+    return PoseEngine(**kwargs)
+
+
 # 实时链路共享引擎：所有 WebSocket 会话串行使用，保证 CPU 不被多路抢占；
 # 开启人物分割掩码（与骨架同一次推理，供前端绘制人物阴影）
-live_pose_engine = PoseEngine(model_complexity=POSE_MODEL_COMPLEXITY, name="pose-live", with_segmentation=True)
+live_pose_engine = create_pose_engine(
+    model_complexity=POSE_MODEL_COMPLEXITY, name="pose-live", with_segmentation=True
+)
 
 
 class PoseStabilizer:

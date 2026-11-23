@@ -20,7 +20,7 @@ from typing import Callable, Dict, List, Optional
 import cv2
 
 from ..config import POSE_MODEL_COMPLEXITY
-from .pose_engine import PoseEngine
+from .pose_engine import create_pose_engine
 
 
 def extract_teaching_pose(
@@ -34,7 +34,7 @@ def extract_teaching_pose(
     if not cap.isOpened():
         raise RuntimeError("无法读取视频文件（编码不受支持？）")
 
-    engine = PoseEngine(
+    engine = create_pose_engine(
         model_complexity=POSE_MODEL_COMPLEXITY,
         static_image_mode=False,
         smooth_landmarks=True,
