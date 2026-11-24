@@ -27,7 +27,7 @@ export const MASTER_COURSE = {
   title: '古风燃脂 第一课',
   desc: '以古风鼓点串联的燃脂组合，10 个切片由慢到快，适合每天跟练一遍。',
   cover: 'gufeng-cover.jpg',
-  // 原始 using_total.mp4 是 HEVC(hvc1)，Chrome 播不了；gufeng-full.mp4 是它的 H.264 版本（同长同画幅）
+  // 原始 using_total.mp4 是 HEVC(hvc1)，Chrome 播不了，已删除；gufeng-full.mp4 是它的 H.264 版本（同长同画幅）
   base: 'gufeng-full.mp4',
   // 完整视频时长（秒）：using_total.mp4 实测 128.93s
   baseSeconds: 128.93,
