@@ -18,6 +18,7 @@ import {
   mapPose,
   poseAt,
   flipX,
+  smoothPose,
   createMaskCache,
   drawShadow,
   mapShadowRect,
@@ -76,7 +77,9 @@ const state = {
   current: 0,
   teachFrames: [],
   teachCache: new Map(),
-  livePose: null,
+  livePose: null, // 显示用（每帧插值后的）骨架
+  livePoseRaw: null, // 最新一次推理结果
+  livePoseAt: 0,
   liveMask: null,
   compare: true,
   skeleton: true,
@@ -1850,7 +1853,8 @@ const live = new LivePoseStream({
     perf.dropped += dropped;
     perf.serverMs = serverMs;
     perf.stages = stages;
-    state.livePose = pose;
+    state.livePoseRaw = pose;
+    state.livePoseAt = performance.now();
     state.liveMask = mask ?? null;
     $('latency-badge').textContent = `延时 ${Math.round(rtt)}ms · 推理 ${Math.round(serverMs)}ms`;
     setConn(true, '实时链路在线');
@@ -1867,6 +1871,7 @@ const live = new LivePoseStream({
       $('rail-state').textContent = '离线';
     } else if (text === '已停止') {
       state.livePose = null;
+      state.livePoseRaw = null;
       state.liveMask = null;
       $('latency-badge').textContent = '未开启';
       setConn(false, '未连接');
@@ -2781,7 +2786,23 @@ function drawCameraOverlay() {
   }
 }
 
+/**
+ * 骨架插值：服务端 ~20fps 回一次结果，绘制循环是 60fps。
+ * 每帧把显示骨架朝最新结果挪一多半距离（≈2 帧到位，约 30ms），
+ * 兼顾连续和跟手；超过 700ms 没有新结果说明链路卡了/人离开画面，保持原样别乱飘。
+ */
+function smoothLivePose() {
+  const raw = state.livePoseRaw;
+  if (!raw) {
+    state.livePose = null;
+    return;
+  }
+  const stale = performance.now() - state.livePoseAt > 700;
+  state.livePose = stale || !state.livePose ? raw : smoothPose(state.livePose, raw, 0.68);
+}
+
 function overlayLoop() {
+  smoothLivePose();
   drawTeachOverlay();
   drawCameraOverlay();
   requestAnimationFrame(overlayLoop);

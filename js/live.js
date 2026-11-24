@@ -2,21 +2,29 @@
  * 实时跟练链路：摄像头 → JPEG 帧 → WebSocket → 服务端骨架 → 回包。
  *
  * 低延时设计：
- *  - 端上只保留一帧在途：收到上一帧结果后才发下一帧，绝不堆积；
- *  - 采集分辨率 640x480、JPEG q=0.6，单帧约 30~50KB；
- *  - 骨架绘制留在前端，服务端只回 33 个关键点。
+ *  - 端上只保留少量帧在途：收到回包才释放名额，绝不堆积；
+ *  - 采集长边压到 480、JPEG q=0.55（姿态模型输入只有 256x256，再大都是浪费编码时间）；
+ *  - 抓帧保持摄像头原始比例、不做裁切：后端的归一化坐标直接对应整幅视频，
+ *    前端用 fitRect 画骨架/阴影不会左右拉伸错位，也不会把人裁出画面；
+ *  - 不做固定间隔节流，靠「在途名额 + 服务端丢帧回执」自然控流；
+ *  - 骨架绘制留在前端（逐帧插值到 60fps），服务端只回 33 个关键点。
  */
 
 import { wsUrl } from './config.js';
 
-const CAPTURE_WIDTH = 640;
-const CAPTURE_HEIGHT = 480;
-const JPEG_QUALITY = 0.6;
+// 摄像头请求分辨率：只要够 480 长边重采样即可，过高只是徒增采集/编码耗时
+const CAPTURE_IDEAL_WIDTH = 640;
+const CAPTURE_IDEAL_HEIGHT = 480;
+// 发送前把长边压到 480：姿态模型输入只有 256x256，再大都是浪费
+const CAPTURE_LONG_SIDE = 480;
+const JPEG_QUALITY = 0.55;
 const ACK_TIMEOUT_MS = 600;
 const RECONNECT_DELAY_MS = 800;
-// 允许同时在途的帧数：1 帧太保守（吞吐被单次往返卡死），
-// 2 帧可以把采集/录制帧率提到 ~20-30fps，同时端到端延时仍只有一帧左右
+// 在途帧数：1 帧会被「编码 16ms + 往返 16ms」串行卡住（实测 17fps）；
+// 2 帧能把吞吐顶到 21~23fps，多余的帧由服务端丢帧回执吸收（skip 不耗推理）。
 const MAX_IN_FLIGHT = 2;
+// 说明：不做固定间隔节流。抓帧本身要 15~20ms，再叠加间隔会把帧率压到 17fps 左右；
+// 反而让在途名额（2 帧）+ 服务端丢帧回执来控流，实测骨架刷新能到 20~25fps。
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -37,8 +45,6 @@ export class LivePoseStream {
     this._lastSendAt = 0;
     this._latestMask = null; // 最近解码的人物掩码 ImageBitmap
     this._canvas = document.createElement('canvas');
-    this._canvas.width = CAPTURE_WIDTH;
-    this._canvas.height = CAPTURE_HEIGHT;
     this._ctx = this._canvas.getContext('2d', { alpha: false });
     this._loopRunning = false;
   }
@@ -104,8 +110,8 @@ export class LivePoseStream {
           return await navigator.mediaDevices.getUserMedia({
             video: {
               deviceId: { exact: device.deviceId },
-              width: { ideal: CAPTURE_WIDTH },
-              height: { ideal: CAPTURE_HEIGHT },
+              width: { ideal: CAPTURE_IDEAL_WIDTH },
+              height: { ideal: CAPTURE_IDEAL_HEIGHT },
               frameRate: { ideal: 30, max: 30 },
             },
             audio: false,
@@ -122,8 +128,8 @@ export class LivePoseStream {
     try {
       return await navigator.mediaDevices.getUserMedia({
         video: {
-          width: { ideal: CAPTURE_WIDTH },
-          height: { ideal: CAPTURE_HEIGHT },
+          width: { ideal: CAPTURE_IDEAL_WIDTH },
+          height: { ideal: CAPTURE_IDEAL_HEIGHT },
           frameRate: { ideal: 30, max: 30 },
         },
         audio: false,
@@ -295,21 +301,17 @@ export class LivePoseStream {
     const vh = video.videoHeight;
     if (!vw || !vh) return Promise.resolve(null);
 
-    // 等比居中裁剪，保证送入模型的画面不变形
-    const scale = Math.max(CAPTURE_WIDTH / vw, CAPTURE_HEIGHT / vh);
-    const sw = CAPTURE_WIDTH / scale;
-    const sh = CAPTURE_HEIGHT / scale;
-    this._ctx.drawImage(
-      video,
-      (vw - sw) / 2,
-      (vh - sh) / 2,
-      sw,
-      sh,
-      0,
-      0,
-      CAPTURE_WIDTH,
-      CAPTURE_HEIGHT
-    );
+    // 保持整幅画面（不裁切）：长边压到 480，短边按摄像头比例算。
+    // 这样归一化坐标 == 视频坐标，前端 fitRect 映射时骨架不会横向拉伸。
+    const scale = Math.min(1, CAPTURE_LONG_SIDE / Math.max(vw, vh));
+    const cw = Math.max(2, Math.round(vw * scale));
+    const ch = Math.max(2, Math.round(vh * scale));
+    if (this._canvas.width !== cw || this._canvas.height !== ch) {
+      this._canvas.width = cw;
+      this._canvas.height = ch;
+    }
+
+    this._ctx.drawImage(video, 0, 0, cw, ch);
 
     return new Promise((resolve) => {
       this._canvas.toBlob((blob) => resolve(blob), 'image/jpeg', JPEG_QUALITY);

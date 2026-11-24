@@ -2,7 +2,7 @@
 
 协议：
     客户端 → 服务端
-        binary                 JPEG 帧（建议 640x480, q=0.6）
+        binary                 JPEG 帧（保持摄像头原始比例，长边 480，q=0.55）
         {"type":"record_start","video_id":..,"segment_index":..,"title":..}
         {"type":"record_stop"}
         {"type":"ping"}

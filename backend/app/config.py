@@ -39,10 +39,13 @@ ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "cpu").strip().lower()
 ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "3")))
 
 # 人物阴影来源：blazepose（与骨架同一次推理，默认）或 yolo（YOLO26n-seg）
-MASK_BACKEND = os.getenv("DANCEMATE_MASK_BACKEND", "yolo").strip().lower()
+# 实测同一台机器（录制帧回放）：YOLO 阴影每帧平均 26ms / p95 63ms，
+# blazepose 阴影直接复用姿态模型的分割输出，平均 19ms / p95 34ms。
+# 阴影只是装饰，默认走 blazepose，不额外抢 CPU、也不会让实时骨架出现长尾卡顿。
+MASK_BACKEND = os.getenv("DANCEMATE_MASK_BACKEND", "blazepose").strip().lower()
 
 # YOLO 分割模型输入尺寸与更新间隔（按帧计，中间帧复用上一张掩码）
-# 640 输入单次约 90ms，每 2 帧跑一次会吃掉一半算力，阴影是装饰性的，4 帧一次足够跟手
+# 仅当显式切回 MASK_BACKEND=yolo 时生效：640 输入单次约 90ms，每 4 帧跑一次
 YOLO_IMGSZ = int(os.getenv("DANCEMATE_YOLO_IMGSZ", "640"))
 YOLO_MASK_INTERVAL = max(1, int(os.getenv("DANCEMATE_YOLO_MASK_INTERVAL", "4")))
 

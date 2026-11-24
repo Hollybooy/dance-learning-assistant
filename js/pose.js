@@ -5,8 +5,11 @@
  * 坐标映射统一在"显示像素空间"完成，自动适配 object-fit: contain 造成的留白。
  */
 
+// 注意：0 号点是「鼻子」。MediaPipe 的 33 点模型没有脖子，
+// 旧版直接把 0 连到双肩，画出来就是脸上一个鼻尖点 + 一个三角，
+// 看着像"把鼻子当成了骨架关节"。这里改用双肩中点合成的脖子（见 drawPose）。
 export const CONNECTIONS = [
-  [0, 11], [0, 12], [11, 12],
+  [11, 12],
   [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19],
   [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
   [11, 23], [12, 24], [23, 24],
@@ -14,8 +17,36 @@ export const CONNECTIONS = [
   [24, 26], [26, 28], [28, 30], [28, 32], [30, 32],
 ];
 
-const KEY_JOINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+// 只画关节圆点；0~10 是面部（鼻/眼/耳/嘴），不参与骨架
+const KEY_JOINTS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
 const MIN_VISIBILITY = 0.3;
+// 腿/髋被画面裁掉时，模型仍会给出画面外的坐标（ONNX 版可见度恒为 1），
+// 直接连线会甩出几条出画面的长线，看着像"识别坏了"。超出画面太多的点不画。
+const FRAME_MARGIN = 0.02;
+
+function onScreen(point) {
+  if (!point) return false;
+  if ((point[3] ?? 1) < MIN_VISIBILITY) return false;
+  return (
+    point[0] > -FRAME_MARGIN &&
+    point[0] < 1 + FRAME_MARGIN &&
+    point[1] > -FRAME_MARGIN &&
+    point[1] < 1 + FRAME_MARGIN
+  );
+}
+
+/** 双肩中点作为脖子：33 点模型里唯一可靠的躯干上端。 */
+export function neckPoint(pose) {
+  const left = pose[11];
+  const right = pose[12];
+  if (!onScreen(left) || !onScreen(right)) return null;
+  return [
+    (left[0] + right[0]) / 2,
+    (left[1] + right[1]) / 2,
+    (left[2] + right[2]) / 2,
+    Math.min(left[3] ?? 1, right[3] ?? 1),
+  ];
+}
 
 /** 计算 object-fit: contain 时媒体在容器内的实际显示区域。 */
 export function fitRect(width, height, mediaWidth, mediaHeight) {
@@ -26,6 +57,39 @@ export function fitRect(width, height, mediaWidth, mediaHeight) {
   const w = mediaWidth * scale;
   const h = mediaHeight * scale;
   return { x: (width - w) / 2, y: (height - h) / 2, w, h };
+}
+
+/**
+ * 骨架平滑：把「显示用骨架」朝最新一次推理结果做指数插值。
+ *
+ * 服务端大约 20~25fps 才回一次结果，直接画会一顿一顿；
+ * 绘制循环是 60fps，每帧只挪一部分距离，人眼看到的就是连续运动。
+ * visibility 直接跟最新的走，避免关节忽明忽暗。
+ */
+export function smoothPose(previous, next, factor = 0.5) {
+  if (!next) return null;
+  if (!previous || previous.length !== next.length) {
+    return next.map((point) => (point ? [...point] : point));
+  }
+  const blend = Math.min(0.95, Math.max(0.05, factor));
+  const out = new Array(next.length);
+  for (let i = 0; i < next.length; i += 1) {
+    const from = previous[i];
+    const to = next[i];
+    if (!to) {
+      out[i] = from ? [...from] : to;
+    } else if (!from) {
+      out[i] = [...to];
+    } else {
+      out[i] = [
+        from[0] + (to[0] - from[0]) * blend,
+        from[1] + (to[1] - from[1]) * blend,
+        from[2] + (to[2] - from[2]) * blend,
+        to[3] ?? from[3],
+      ];
+    }
+  }
+  return out;
 }
 
 export function drawPose(ctx, pose, rect, options = {}) {
@@ -53,15 +117,33 @@ export function drawPose(ctx, pose, rect, options = {}) {
     ctx.shadowBlur = 8;
   }
 
+  const toXY = (p) => [rect.x + p[0] * rect.w, rect.y + p[1] * rect.h];
+
   for (const [a, b] of CONNECTIONS) {
     const pa = pose[a];
     const pb = pose[b];
-    if (!pa || !pb) continue;
-    if ((pa[3] ?? 1) < MIN_VISIBILITY || (pb[3] ?? 1) < MIN_VISIBILITY) continue;
+    if (!onScreen(pa) || !onScreen(pb)) continue;
+    const [ax, ay] = toXY(pa);
+    const [bx, by] = toXY(pb);
     ctx.beginPath();
-    ctx.moveTo(rect.x + pa[0] * rect.w, rect.y + pa[1] * rect.h);
-    ctx.lineTo(rect.x + pb[0] * rect.w, rect.y + pb[1] * rect.h);
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
     ctx.stroke();
+  }
+
+  // 脖子（双肩中点）连到两肩：替代原来"鼻尖连双肩"的三角
+  const neck = neckPoint(pose);
+  if (neck) {
+    const [nx, ny] = toXY(neck);
+    for (const shoulder of [11, 12]) {
+      const p = pose[shoulder];
+      if (!onScreen(p)) continue;
+      const [sx, sy] = toXY(p);
+      ctx.beginPath();
+      ctx.moveTo(nx, ny);
+      ctx.lineTo(sx, sy);
+      ctx.stroke();
+    }
   }
 
   if (joints) {
@@ -70,9 +152,10 @@ export function drawPose(ctx, pose, rect, options = {}) {
     ctx.globalAlpha = alpha * jointAlpha;
     for (const index of KEY_JOINTS) {
       const p = pose[index];
-      if (!p || (p[3] ?? 1) < MIN_VISIBILITY) continue;
+      if (!onScreen(p)) continue;
+      const [x, y] = toXY(p);
       ctx.beginPath();
-      ctx.arc(rect.x + p[0] * rect.w, rect.y + p[1] * rect.h, lineWidth * 1.1, 0, Math.PI * 2);
+      ctx.arc(x, y, lineWidth * 1.1, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = alpha;
