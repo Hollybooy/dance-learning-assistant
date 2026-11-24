@@ -1288,6 +1288,22 @@ body.is-home .home-dock { display: block; }
 .detail__actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .detail__actions .btn { height: 58px; font-size: 15px; }
 
+/* 素材管理：虚线分隔，只对上传素材显示 */
+.detail__manage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+}
+.detail__manage[hidden] { display: none; }
+.detail__manage-hint { font-size: 11px; line-height: 1.5; color: var(--muted); }
+.btn--danger { color: var(--coral); border-color: rgba(244, 87, 63, 0.42); }
+.btn--danger:hover { background: rgba(244, 87, 63, 0.08); border-color: var(--coral); }
+.btn--danger svg { width: 15px; height: 15px; fill: currentColor; }
+
 /* ==========================================================================
    跟练舞台
    ========================================================================== */
@@ -2096,6 +2112,8 @@ body.is-home .home-dock { display: block; }
   background: var(--brand-2);
   transition: background-color 0.2s, transform 0.18s var(--ease);
 }
+/* 重合度 ≥ 90% 绿、其余红（阈值见 js/app.js FOLLOW_GOOD_RATIO） */
+.ribbon-cell.is-good { background: var(--brand-2); }
 .ribbon-cell.is-bad { background: var(--coral); }
 .ribbon-cell.is-idle { background: var(--sage-deep); }
 /* 当前所在片段：整块加一圈描边，一眼看出播到第几段 */
@@ -2121,6 +2139,8 @@ body.is-home .home-dock { display: block; }
 .error-legend i.ok { background: var(--brand-2); }
 .error-legend i.bad { background: var(--coral); }
 .replay-meta b { margin-left: auto; font-size: 12px; color: var(--text); font-weight: 700; }
+#match-score.is-good { color: var(--brand); }
+#match-score.is-bad { color: var(--coral); }
 
 /* 播放按钮：只放图标，不再写“播放/暂停”两个汉字 */
 .circle-btn--icon { padding: 0; }

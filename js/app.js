@@ -1356,6 +1356,10 @@ function renderDetail() {
     .filter(Boolean)
     .map((text) => `<li>${escapeHtml(text)}</li>`)
     .join('');
+
+  // 只有后端上传的素材能删：内置课程（local / builtin）挂的是随包素材，不能删
+  const manage = $('detail-manage');
+  if (manage) manage.hidden = Boolean(meta.local || meta.builtin);
 }
 
 /* ------------------------------------------------------------------ 片段轮播 */
@@ -3144,6 +3148,43 @@ async function deleteSession(sessionId) {
   }
 }
 
+/** 删除上传素材：视频、切片、骨架与轮廓一起删，练习回放不受影响 */
+async function deleteVideo(meta) {
+  if (!meta || meta.local || meta.builtin) return;
+  const ok = confirm(
+    `确定删除素材「${meta.title}」吗？\n视频、切片、骨架与人物轮廓会一起删除，已录制的练习回放不受影响。`
+  );
+  if (!ok) return;
+  try {
+    await api.deleteVideo(meta.id);
+  } catch (error) {
+    toast(`删除失败：${error.message}`, 'error');
+    return;
+  }
+
+  // 清掉这个素材在前端留下的缓存与收藏
+  videoSizeCache.delete(meta.id);
+  state.teachCache.delete(meta.id);
+  teachMaskFrames.delete(meta.id);
+  state.remoteVideos = (state.remoteVideos || []).filter((video) => video.id !== meta.id);
+  state.favs.videos = state.favs.videos.filter((id) => id !== meta.id);
+  saveFavs();
+
+  const isCurrent = state.video?.id === meta.id;
+  if (isCurrent) {
+    player.pause();
+    teachVideo.pause();
+    state.video = null;
+    state.segments = [];
+    state.current = 0;
+    state.teachFrames = [];
+    lastTeachMask = null;
+  }
+  await loadLibrary({ silent: true });
+  if (isCurrent) navigate('#/classes');
+  toast('素材已删除');
+}
+
 function stepSession(direction) {
   if (!state.sessions.length) return;
   const index = state.sessions.findIndex((item) => item.id === state.currentSessionId);
@@ -3189,6 +3230,18 @@ function poseSimilarity(a, b) {
  */
 const RIBBON_CELLS = 6;
 
+/* 动作重合度 ≥ 90% 记为「跟随良好」（绿），其余记为「需要纠正」（红） */
+const FOLLOW_GOOD_RATIO = 0.9;
+
+/** 平均跟随度：≥90% 绿、<90% 红；没有数值时保持中性色 */
+function paintMatchScore(el, text, ratio) {
+  if (!el) return;
+  el.textContent = text;
+  const hasRatio = Number.isFinite(ratio);
+  el.classList.toggle('is-good', hasRatio && ratio >= FOLLOW_GOOD_RATIO);
+  el.classList.toggle('is-bad', hasRatio && ratio < FOLLOW_GOOD_RATIO);
+}
+
 /** 片段在完整视频时间轴上的起止；没有 masterStart 时退回片段自身的起止 */
 const segStart = (segment) => (Number.isFinite(segment?.masterStart) ? segment.masterStart : segment?.start || 0);
 const segEnd = (segment) =>
@@ -3199,8 +3252,9 @@ function ribbonMarkup(blocks) {
     .map((block, index) => {
       const cells = block.cells
         .map((cell) => {
-          const cls = cell.bad ? ' is-bad' : cell.idle ? ' is-idle' : '';
-          return `<i class="ribbon-cell${cls}" data-t="${cell.t.toFixed(2)}"></i>`;
+          const cls = cell.idle ? ' is-idle' : cell.bad ? ' is-bad' : ' is-good';
+          const label = cell.label ? ` title="${cell.label}"` : '';
+          return `<i class="ribbon-cell${cls}" data-t="${cell.t.toFixed(2)}"${label}></i>`;
         })
         .join('');
       return `<span class="ribbon-block" data-seg="${index}" data-start="${block.start.toFixed(2)}">${cells}</span>`;
@@ -3220,20 +3274,26 @@ async function renderErrorRibbon(session) {
     const segments = session.segments?.length
       ? session.segments
       : [{ index: 0, start: 0, end: session.duration || 0 }];
-    const badEvery = session.score >= 90 ? 16 : 8;
+    // 演示数据没有逐帧骨架：整体 ≥90% 就全绿，否则按固定图案撒几格「需要纠正」
+    const demoGood = session.score >= FOLLOW_GOOD_RATIO * 100;
 
     replayBlocks = segments.map((segment, index) => {
       const from = segStart(segment);
       const span = Math.max(0.4, segEnd(segment) - from);
-      const cells = Array.from({ length: RIBBON_CELLS }, (_, cell) => ({
-        bad: (index * 5 + cell * 3 + session.id.length) % badEvery === 0,
-        t: from + ((cell + 0.5) / RIBBON_CELLS) * span,
-      }));
+      const cells = Array.from({ length: RIBBON_CELLS }, (_, cell) => {
+        const spot = !demoGood && (index * 5 + cell * 3 + session.id.length) % 8 === 0;
+        return {
+          good: !spot,
+          bad: spot,
+          t: from + ((cell + 0.5) / RIBBON_CELLS) * span,
+          label: spot ? '需要纠正' : '跟随良好',
+        };
+      });
       return { seg: index, start: from, end: segEnd(segment), cells };
     });
 
     ribbon.innerHTML = ribbonMarkup(replayBlocks);
-    score.textContent = `平均跟随度 ${session.score}%`;
+    paintMatchScore(score, `平均跟随度 ${session.score}%`, session.score / 100);
     markRibbonActive();
     updateRibbonHead(replayTime());
     return;
@@ -3254,7 +3314,7 @@ async function renderErrorRibbon(session) {
       },
     ];
     ribbon.innerHTML = ribbonMarkup(replayBlocks);
-    score.textContent = label;
+    paintMatchScore(score, label);
     updateRibbonHead(replayTime());
   };
 
@@ -3290,12 +3350,26 @@ async function renderErrorRibbon(session) {
       sum += similarity;
       count += 1;
     }
-    return { t, bad: Boolean(similarity) && similarity < 0.55, idle: !similarity };
+    const good = similarity >= FOLLOW_GOOD_RATIO;
+    return {
+      t,
+      good: Boolean(similarity) && good,
+      bad: Boolean(similarity) && !good,
+      idle: !similarity,
+      label: similarity
+        ? `${good ? '跟随良好' : '需要纠正'} ${Math.round(similarity * 100)}%`
+        : '无骨架数据',
+    };
   });
 
   replayBlocks = [{ seg: 0, start: 0, end: duration, cells }];
   ribbon.innerHTML = ribbonMarkup(replayBlocks);
-  score.textContent = count ? `平均跟随度 ${Math.round((sum / count) * 100)}%` : '--';
+  const average = count ? sum / count : NaN;
+  paintMatchScore(
+    score,
+    count ? `平均跟随度 ${Math.round(average * 100)}%` : '--',
+    Number.isFinite(average) ? average : undefined
+  );
   updateRibbonHead(replayTime());
 }
 
@@ -3780,6 +3854,9 @@ function bindEvents() {
   });
 
   $('detail-back').addEventListener('click', () => navigate('#/classes'));
+  $('detail-delete').addEventListener('click', () => {
+    if (state.video) deleteVideo(state.video);
+  });
   $$('[data-arc-dir]').forEach((button) => {
     button.addEventListener('click', () => moveArc(Number(button.dataset.arcDir) || 1));
   });

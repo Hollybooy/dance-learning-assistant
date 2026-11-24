@@ -105,6 +105,9 @@ async def get_video(video_id: str):
 
 @router.delete("/{video_id}")
 async def delete_video(video_id: str):
+    # 路径会拼到 data 目录下，先挡掉非法 ID（与 sessions 删除接口一致）
+    if not safe_id(video_id):
+        raise HTTPException(400, "非法视频 ID")
     if not video_store.get(video_id):
         raise HTTPException(404, "视频不存在")
     video_store.delete(video_id)

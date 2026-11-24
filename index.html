@@ -278,6 +278,15 @@
             <h3 id="detail-title">尚未选择课程</h3>
             <p class="detail__desc" id="detail-desc">从课程大厅挑选一个教学视频，即可查看课程时长、片段划分与骨架分析状态。</p>
             <ul class="detail__facts" id="detail-facts"></ul>
+
+            <!-- 素材管理：仅上传的视频可删，内置课程/本地静态素材隐藏这一行 -->
+            <div class="detail__manage" id="detail-manage" hidden>
+              <button class="btn btn--ghost btn--sm btn--danger" id="detail-delete" type="button">
+                <svg><use href="#i-trash"/></svg>
+                删除素材
+              </button>
+              <span class="detail__manage-hint">视频、切片、骨架与轮廓数据会一起删除，练习回放不受影响</span>
+            </div>
           </div>
 
           <div class="detail__actions">
@@ -585,8 +594,8 @@
 
             <div class="replay-meta">
               <div class="error-legend">
-                <span><i class="ok"></i>跟随良好</span>
-                <span><i class="bad"></i>需要纠正</span>
+                <span><i class="ok"></i>跟随良好 ≥90%</span>
+                <span><i class="bad"></i>需要纠正 &lt;90%</span>
               </div>
               <b id="match-score">--</b>
             </div>

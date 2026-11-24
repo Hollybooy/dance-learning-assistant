@@ -37,6 +37,9 @@ export const api = {
 
   streamUrl: (id) => apiUrl(`/api/videos/${id}/stream`),
 
+  deleteVideo: (id) =>
+    fetch(apiUrl(`/api/videos/${id}`), { method: 'DELETE' }).then(parse),
+
   listSessions: () => fetch(apiUrl('/api/sessions')).then(parse),
 
   getSession: (id) => fetch(apiUrl(`/api/sessions/${id}`)).then(parse),
