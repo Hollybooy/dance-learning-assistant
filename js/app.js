@@ -61,6 +61,8 @@ const DEFAULT_SETTINGS = {
   dockDelay: 1500,
   voiceTips: true,
   voiceCommands: true,
+  coachVoice: 'auto',
+  coachRate: 0.98,
   showPerf: false,
 };
 
@@ -1498,6 +1500,7 @@ async function playSegment(index) {
     teachVideo.currentTime = segment.start || 0;
     updateSegProgress();
     await teachVideo.play().catch(() => showDock());
+    if (token === segmentPlayToken) announceSegment(index);
   } catch (error) {
     if (token === segmentPlayToken) {
       console.warn('segment playback:', error.message);
@@ -1530,7 +1533,16 @@ function handleSegmentEnd(fromEnded = false) {
     showDock();
     clearTimeout(dockHideTimer);
     setTeachBadge('本段结束 · 手动切下一段');
+    speakCoachTip('这一段完成，选下一段继续');
   }
+}
+
+/** 切到某一段时播报一次；顺便重置「轮廓贴合」的夸奖状态 */
+function announceSegment(index) {
+  overlapPraised = false;
+  const total = state.segments.length;
+  const prefix = total > 1 ? `第 ${index + 1} 段，共 ${total} 段` : '开始跟练';
+  speakCoachTip(`${prefix}，跟好老师的节奏`);
 }
 
 /* ------------------------------------------------------------- 骨架与掩码 */
@@ -1843,12 +1855,14 @@ const live = new LivePoseStream({
       enterRecordingLayout();
       $('replay-status').textContent = `录制中：${title}`;
       toast('开始录制，跟随教学片段完成动作');
+      speakCoachTip('开始录制，我盯着你的动作');
     } else {
       exitRecordingLayout();
       if (session) {
         $('replay-status').textContent = `已保存：${session.title}`;
         state.currentSessionId = session.id;
         toast('练习已保存，正在打开回放');
+        speakCoachTip('练习已保存，一起去回放看看');
         refreshSessions(false).then(() => navigate(`#/correct/${session.id}`));
       }
     }
@@ -1998,6 +2012,8 @@ function drawTeachOverlay() {
 
 let overlapCanvasEl = null;
 let lastOverlapCheck = 0;
+let overlapPraised = false; // 同一段只夸一次，掉回 72% 以下再重新计
+let lastOverlapPct = NaN; // 供「进度」语音指令播报
 
 /** 教学轮廓 vs 你的轮廓（映射到教学帧后）的交并比，节流更新到角标。 */
 function updateOverlapBadge(teachMask, liveMask, liveRectNorm, teachPose) {
@@ -2046,7 +2062,14 @@ function updateOverlapBadge(teachMask, liveMask, liveRectNorm, teachPose) {
     if (a && b) inter += 1;
   }
   const pct = union ? Math.round((inter / union) * 100) : 0;
+  lastOverlapPct = pct;
   badge.textContent = `重合 ${pct}%`;
+  if (pct >= 90 && !overlapPraised) {
+    overlapPraised = true;
+    showCoachTip('轮廓几乎重合了，保持住！');
+  } else if (pct < 72) {
+    overlapPraised = false;
+  }
   maybeCoachTip(analyzeRegions(teachData, liveData, size, teachPose));
 }
 
@@ -2190,33 +2213,82 @@ function tipTextFor(entry) {
   return `${name}再向上抬高一点点就贴合了`;
 }
 
-/* 小教练语音播报：用浏览器自带的 speechSynthesis，不需要后端或联网。
-   系统语音列表可能异步加载，voiceschanged 时缓存一次中文声音。 */
+/* 小教练语音播报：浏览器自带 speechSynthesis，不需要后端或联网。
+   音色挑选顺序：Edge 的 Natural 在线音 > 晓晓/晓伊/云希等高质量音 > 婷婷/美佳/Google 中文 >
+   其他中文音；Huihui、Kangkang 这类老式机械音只在没有别的中文音时才用。
+   音色列表由系统异步加载，voiceschanged 时会重刷设置里的下拉。 */
+let coachVoices = [];
 let coachVoice = null;
-function resolveCoachVoice() {
-  if (!('speechSynthesis' in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
+
+const COACH_VOICE_HINTS = [
+  [/natural|online/i, 6],
+  [/xiaoxiao/i, 5],
+  [/xiaoyi/i, 4.6],
+  [/yunxi|yunyang|yunjian|xiaomo/i, 4.2],
+  [/ting-?ting/i, 4],
+  [/mei-?jia|meijia/i, 3.6],
+  [/google/i, 3.2],
+  [/yaoyao/i, 2.6],
+  [/huihui|kangkang/i, 0.6],
+];
+
+function isChineseVoice(voice) {
   return (
-    voices.find((voice) => /^zh[-_]?cn/i.test(voice.lang)) ||
-    voices.find((voice) => /^zh/i.test(voice.lang)) ||
-    null
+    /^zh([-_](cn|hans|sg))?/i.test(voice.lang || '') ||
+    /chinese|中文|普通话/i.test(voice.name || '')
   );
 }
+
+function coachVoiceScore(voice) {
+  const name = voice.name || '';
+  let score = 1;
+  COACH_VOICE_HINTS.forEach(([pattern, weight]) => {
+    if (pattern.test(name)) score = weight;
+  });
+  if (voice.localService === false) score += 0.2; // 在线音通常更自然
+  return score;
+}
+
+function loadCoachVoices() {
+  if (!('speechSynthesis' in window)) return [];
+  coachVoices = window.speechSynthesis
+    .getVoices()
+    .filter(isChineseVoice)
+    .sort((a, b) => coachVoiceScore(b) - coachVoiceScore(a));
+  return coachVoices;
+}
+
+function resolveCoachVoice() {
+  if (!('speechSynthesis' in window)) return null;
+  const voices = coachVoices.length ? coachVoices : loadCoachVoices();
+  const preferred = state.settings?.coachVoice;
+  if (preferred && preferred !== 'auto') {
+    const picked = voices.find((voice) => voice.voiceURI === preferred || voice.name === preferred);
+    if (picked) return picked;
+  }
+  return voices[0] || null;
+}
+
 if ('speechSynthesis' in window && window.speechSynthesis.addEventListener) {
   window.speechSynthesis.addEventListener('voiceschanged', () => {
+    coachVoices = [];
     coachVoice = resolveCoachVoice();
+    // 语音列表可能比设置面板晚到，到了再补刷一次下拉
+    if (state.route === 'profile') renderSettings();
   });
 }
 
-function speakText(text) {
+function speakText(text, { interrupt = true } = {}) {
+  if (!text) return;
   if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
   const synth = window.speechSynthesis;
   try {
-    synth.cancel(); // 新提示打断上一条，避免多条叠加
+    if (interrupt) synth.cancel(); // 新提示打断上一条，避免多条叠加
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
-    utterance.rate = 1.08;
-    utterance.pitch = 1;
+    utterance.rate = Number(state.settings?.coachRate) || 0.98;
+    utterance.pitch = 1.05;
+    utterance.volume = 1;
     const voice = coachVoice || resolveCoachVoice();
     if (voice) utterance.voice = voice;
     synth.speak(utterance);
@@ -2406,7 +2478,17 @@ function findVideoByVoice(query) {
   return bestScore >= 0.45 ? best : null;
 }
 
+const COACH_HELP_TEXT =
+  '可以说：暂停、继续、下一段、上一段、重播、开始跟练、显示骨架、隐藏阴影、' +
+  '快一点、慢一点、原速、开始录制、结束录制、进度、收藏、安静，或者直接说课程名字。';
+
+/** 指令的统一入口：分支里自己播报的返回 'silent'，其余沿用后端回复文案 */
 async function runVoiceCommand(message) {
+  const result = await handleVoiceCommand(message);
+  if (result !== 'silent' && message.reply) speakCoachTip(message.reply);
+}
+
+async function handleVoiceCommand(message) {
   const action = message.action;
 
   if (action === 'play_video') {
@@ -2454,6 +2536,66 @@ async function runVoiceCommand(message) {
     return;
   }
 
+  if (action === 'skeleton_on' || action === 'skeleton_off') {
+    setSkeletonVisible(action === 'skeleton_on');
+    return;
+  }
+
+  if (action === 'shadow_on' || action === 'shadow_off') {
+    setShadowVisible(action === 'shadow_on');
+    return;
+  }
+
+  if (action === 'speed_up' || action === 'speed_down' || action === 'speed_normal') {
+    setSpeed(action === 'speed_normal' ? 1 : stepSpeed(action === 'speed_up' ? 1 : -1));
+    return;
+  }
+
+  if (action === 'record_start' || action === 'record_stop') {
+    if (!state.video) {
+      toast('先选一个课程再录制');
+      return 'silent';
+    }
+    if (state.route !== 'learning') navigate('#/learning');
+    if (action === 'record_start' && !state.recording) $('record-btn').click();
+    if (action === 'record_stop' && state.recording) $('record-btn').click();
+    // 开始/结束的播报由录制状态回调负责，这里不再重复
+    return 'silent';
+  }
+
+  if (action === 'report_progress') {
+    showCoachTip(progressLine());
+    return 'silent';
+  }
+
+  if (action === 'mute_coach') {
+    speakText('好的，我先安静，需要的时候再叫我');
+    state.settings.voiceTips = false;
+    saveSettings();
+    syncVisButtons();
+    return 'silent';
+  }
+
+  if (action === 'unmute_coach') {
+    state.settings.voiceTips = true;
+    saveSettings();
+    syncVisButtons();
+    return;
+  }
+
+  if (action === 'favorite') {
+    if (!state.video) return 'silent';
+    const added = toggleFav('videos', state.video.id);
+    renderStars();
+    speakCoachTip(added ? `已收藏《${state.video.title}》` : '已取消收藏');
+    return 'silent';
+  }
+
+  if (action === 'help') {
+    speakCoachTip(COACH_HELP_TEXT);
+    return 'silent';
+  }
+
   if (!['next_segment', 'prev_segment', 'restart_segment'].includes(action)) return;
   if (!state.video || !state.segments.length) return;
   if (state.route !== 'learning') navigate('#/learning');
@@ -2463,8 +2605,50 @@ async function runVoiceCommand(message) {
   else playSegment((state.current - 1 + total) % total);
 }
 
+/* ---------------------------------------------- 语音指令用到的状态修改 */
+
+function setSkeletonVisible(visible) {
+  state.skeleton = visible;
+  state.settings.skeleton = visible;
+  saveSettings();
+  syncVisButtons();
+}
+
+function setShadowVisible(visible) {
+  state.shadows = visible;
+  state.settings.shadows = visible;
+  saveSettings();
+  syncVisButtons();
+}
+
+function setSpeed(rate) {
+  state.speed = rate;
+  state.settings.speed = rate;
+  saveSettings();
+  teachVideo.playbackRate = rate;
+  const select = $('speed-select');
+  if (select) select.value = String(rate);
+}
+
+/** 在 PLAYBACK_RATES 里挪一格，夹在两端 */
+function stepSpeed(direction) {
+  const index = PLAYBACK_RATES.indexOf(state.speed);
+  const from = index >= 0 ? index : PLAYBACK_RATES.indexOf(1);
+  const next = Math.min(PLAYBACK_RATES.length - 1, Math.max(0, from + direction));
+  return PLAYBACK_RATES[next];
+}
+
+/** 「现在到哪了」的口播文案 */
+function progressLine() {
+  if (!state.video) return '还没有选择课程，先说一个课程名字吧';
+  const total = state.segments.length;
+  const pct = Number.isFinite(lastOverlapPct) ? `，当前重合 ${Math.round(lastOverlapPct)}%` : '';
+  if (!total) return `${state.video.title}${pct}`;
+  return `第 ${state.current + 1} 段，共 ${total} 段${pct}`;
+}
+
 // 调试钩子：便于自动化验证部位判定与文案方向（不参与业务逻辑）
-window.__coachTest = { analyzeRegions, tipTextFor, TIP_REGIONS };
+window.__coachTest = { analyzeRegions, tipTextFor, TIP_REGIONS, progressLine };
 window.__voiceTest = {
   handleVoiceMessage,
   runVoiceCommand,
@@ -3663,6 +3847,29 @@ function renderFriends() {
   });
 }
 
+/** 系统语音名又长又带厂商前缀，下拉里只留中文名部分 */
+function shortVoiceName(name) {
+  return String(name || '')
+    .replace(/microsoft|google|online|natural|wavenet|neural/gi, ' ')
+    .replace(/[（(][^)）]*[)）]/g, ' ')
+    .replace(/\s*[-–]\s*(chinese|中文|普通话).*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 音色下拉：自动（按优先级挑最优中文音）+ 系统里所有中文语音 */
+function coachVoiceOptions() {
+  const voices = coachVoices.length ? coachVoices : loadCoachVoices();
+  const autoLabel = voices.length
+    ? `自动（${shortVoiceName(voices[0].name) || '系统中文音'}）`
+    : '自动（未检测到中文音色）';
+  const options = [['auto', autoLabel]];
+  voices.slice(0, 12).forEach((voice) =>
+    options.push([voice.voiceURI, shortVoiceName(voice.name) || voice.name])
+  );
+  return options;
+}
+
 function renderSettings() {
   const box = $('settings-list');
   if (!box) return;
@@ -3678,6 +3885,24 @@ function renderSettings() {
     { key: 'skeleton', label: '默认显示骨架', type: 'toggle', value: state.settings.skeleton },
     { key: 'shadows', label: '默认显示人物阴影', type: 'toggle', value: state.settings.shadows },
     { key: 'voiceTips', label: '小教练语音提示', type: 'toggle', value: state.settings.voiceTips !== false },
+    {
+      key: 'coachVoice',
+      label: '小教练音色',
+      type: 'select',
+      value: state.settings.coachVoice || 'auto',
+      options: coachVoiceOptions(),
+    },
+    {
+      key: 'coachRate',
+      label: '小教练语速',
+      type: 'select',
+      value: String(state.settings.coachRate || 0.98),
+      options: [
+        ['0.85', '慢一点'],
+        ['0.98', '正常'],
+        ['1.12', '快一点'],
+      ],
+    },
     { key: 'voiceCommands', label: '语音指令（唤醒词：小教练）', type: 'toggle', value: state.settings.voiceCommands !== false },
     { key: 'showPerf', label: '显示性能面板（调试）', type: 'toggle', value: state.settings.showPerf === true },
     {
@@ -3725,7 +3950,7 @@ function renderSettings() {
 }
 
 function applySetting(key, rawValue) {
-  const numeric = ['speed', 'countdown'].includes(key);
+  const numeric = ['speed', 'countdown', 'coachRate'].includes(key);
   const value = numeric ? Number(rawValue) : rawValue;
   state.settings[key] = value;
   saveSettings();
@@ -3743,6 +3968,12 @@ function applySetting(key, rawValue) {
   } else if (key === 'voiceTips') {
     syncVisButtons();
     if (!value) stopCoachVoice();
+  } else if (key === 'coachVoice') {
+    coachVoices = loadCoachVoices();
+    coachVoice = resolveCoachVoice();
+    speakText('我是小教练，以后就用这个声音陪你练');
+  } else if (key === 'coachRate') {
+    speakText('用这个语速说话，听着还舒服吗');
   } else if (key === 'voiceCommands') {
     syncVoiceButton();
     if (value) connectVoice();

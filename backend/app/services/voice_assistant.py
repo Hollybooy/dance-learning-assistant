@@ -42,6 +42,8 @@ logger = logging.getLogger("dancemate.voice")
 
 _INITIAL_PROMPT = (
     "小教练，暂停，继续播放，上一片段，下一片段，重播本段，开始跟练，"
+    "显示骨架，隐藏阴影，快一点，慢一点，原速，开始录制，结束录制，"
+    "现在进度怎么样，收藏这个课程，安静一点，你会什么，"
     "播放古风燃脂第一课，播放 Hip-Hop 律动入门。"
 )
 
@@ -52,6 +54,21 @@ _ACTION_REPLY = {
     "prev_segment": "切换到上一段",
     "restart_segment": "重播本段",
     "start_practice": "开始跟练",
+    "skeleton_on": "骨架已显示",
+    "skeleton_off": "骨架已隐藏",
+    "shadow_on": "人物阴影已显示",
+    "shadow_off": "人物阴影已隐藏",
+    "speed_up": "好，加快一点",
+    "speed_down": "好，放慢一点",
+    "speed_normal": "恢复原速",
+    "unmute_coach": "语音提示已恢复",
+    # 下面这些由前端自己播报（要报具体数字/状态），这里留空避免说两遍
+    "record_start": "",
+    "record_stop": "",
+    "report_progress": "",
+    "mute_coach": "",
+    "favorite": "",
+    "help": "",
 }
 
 
@@ -83,6 +100,48 @@ def parse_rule_intent(query: str) -> Optional[Dict[str, Any]]:
     q = _normalize(query)
     if not q:
         return None
+
+    # 画面/语速/录制等开关类指令放在最前面：「恢复原速」不能被「恢复=继续」抢走
+    if any(key in q for key in ("显示骨架", "打开骨架", "开骨架", "要骨架")):
+        return {"action": "skeleton_on"}
+    if any(key in q for key in ("隐藏骨架", "关掉骨架", "关闭骨架", "不要骨架", "骨架关")):
+        return {"action": "skeleton_off"}
+    if any(key in q for key in ("显示阴影", "打开阴影", "开阴影", "要阴影", "显示轮廓")):
+        return {"action": "shadow_on"}
+    if any(key in q for key in ("隐藏阴影", "关掉阴影", "关闭阴影", "不要阴影", "阴影关", "隐藏轮廓")):
+        return {"action": "shadow_off"}
+    # 语序不固定（「把骨架隐藏」），按名词 + 动作再兜一层
+    if "骨架" in q:
+        if any(key in q for key in ("隐藏", "关", "不要", "去掉", "撤")):
+            return {"action": "skeleton_off"}
+        if any(key in q for key in ("显示", "打开", "开", "要", "出现")):
+            return {"action": "skeleton_on"}
+    if any(key in q for key in ("阴影", "轮廓")):
+        if any(key in q for key in ("隐藏", "关", "不要", "去掉", "撤")):
+            return {"action": "shadow_off"}
+        if any(key in q for key in ("显示", "打开", "开", "要", "出现")):
+            return {"action": "shadow_on"}
+    if any(key in q for key in ("正常速度", "原速", "正常倍速", "恢复速度")):
+        return {"action": "speed_normal"}
+    if any(key in q for key in ("快一点", "快些", "快点", "加速")):
+        return {"action": "speed_up"}
+    if any(key in q for key in ("慢一点", "慢些", "慢点", "减速")):
+        return {"action": "speed_down"}
+    if any(key in q for key in ("结束录制", "停止录制", "停止录像", "别录了")):
+        return {"action": "record_stop"}
+    if any(key in q for key in ("开始录制", "开始录像", "录一段")):
+        return {"action": "record_start"}
+    if any(key in q for key in ("进度", "到哪了", "第几段", "成绩", "多少分", "准确率")):
+        return {"action": "report_progress"}
+    if any(key in q for key in ("别说话", "安静", "闭嘴", "关闭语音", "不用说话")):
+        return {"action": "mute_coach"}
+    if any(key in q for key in ("可以说话", "打开语音", "恢复语音", "说话吧")):
+        return {"action": "unmute_coach"}
+    if "收藏" in q:
+        return {"action": "favorite"}
+    if any(key in q for key in ("帮助", "会什么", "能做什么", "指令", "怎么用")):
+        return {"action": "help"}
+
     if any(key in q for key in ("暂停", "停一下", "先停", "别放")):
         return {"action": "pause"}
     if any(key in q for key in ("继续", "接着", "恢复")):
@@ -154,7 +213,10 @@ def _ollama_intent(query: str, titles: List[str]) -> Optional[Dict[str, Any]]:
         "你是舞蹈教学 App 的语音指令解析器。只输出一个 JSON 对象，不要解释。"
         '格式：{"action":"...","video":"课程标题或空字符串"}。'
         "action 只能是：play_video、pause、resume、next_segment、prev_segment、"
-        "restart_segment、start_practice、none。"
+        "restart_segment、start_practice、skeleton_on、skeleton_off、"
+        "shadow_on、shadow_off、speed_up、speed_down、speed_normal、"
+        "record_start、record_stop、report_progress、mute_coach、unmute_coach、"
+        "favorite、help、none。"
         f"\n课程标题列表：\n{title_list}"
     )
     payload = {

@@ -3043,7 +3043,9 @@ body.is-home .home-dock { display: block; }
   cursor: pointer;
 }
 .setting:last-child { border-bottom: none; }
-.setting > span { color: var(--text); }
+.setting > span { color: var(--text); white-space: nowrap; }
+/* 音色下拉里的语音名很长，限宽避免把左侧标签挤成竖排 */
+.setting select { max-width: 172px; }
 .setting input[type='checkbox'] { position: absolute; opacity: 0; width: 0; height: 0; }
 .switch {
   position: relative;
