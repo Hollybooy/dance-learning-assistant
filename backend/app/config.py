@@ -26,18 +26,18 @@ POSE_MODEL_COMPLEXITY = int(os.getenv("DANCEMATE_POSE_COMPLEXITY", "0"))
 # Tasks API 模型变体：lite / full
 POSE_MODEL_VARIANT = os.getenv("DANCEMATE_POSE_MODEL", "lite")
 
-# 推理后端：mediapipe（默认）/ onnx / auto（有 ONNX Runtime 与模型时走 ONNX）
-# 实测同一批录制帧（本机 CPU，含人物分割，120 帧）：
-#   mediapipe  avg 18.6ms / p95 23.7ms / 丢人 0    —— 自带时序跟踪，骨架最稳
-#   onnx       avg 26.5ms / p95 49.7ms / 丢人 ~17%  —— 逐帧独立推理，无时序滤波，
-#              抖动约为 MediaPipe 的 1.6 倍（修掉 ROI 反推之前丢人接近一半）
-# 骨架观感优先，默认走 MediaPipe；要用 ONNX（如需 GPU/CUDA）显式设 onnx。
-POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "mediapipe").strip().lower()
+# 推理后端：onnx（默认，走 GPU）/ mediapipe / auto（有 ONNX Runtime 与模型时走 ONNX）
+# 实测同一批录制帧（本机 GTX 1650 Ti，含人体检测，交替两轮）：
+#   纯姿态网络 p50：CPU 16.2ms / DirectML 10.4ms
+#   端到端   p50：CPU 20.3ms / DirectML 11.8ms，p95 47ms → 25ms
+# ONNX 逐帧独立推理、无时序滤波，抖动比 MediaPipe 略大，靠 PoseStabilizer 压制。
+POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "onnx").strip().lower()
 
-# ONNX Runtime 执行提供程序：cpu（默认）/ dml（DirectML）/ cuda
-# 实测这台机器上 256x256 的姿态模型 CPU 17.5ms/帧、DirectML 36ms/帧，
-# 且 DML 同时跑骨架 + YOLO 两路时会偶发 0x80004005 直接抛异常（骨架卡住），所以默认 CPU。
-ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "cpu").strip().lower()
+# ONNX Runtime 执行提供程序：dml（默认，Windows GPU）/ cuda / cpu
+# 运行时没有对应 EP 会自动回退 CPU（见 onnx_pose/ort_net.py），跨平台安全。
+# 注意：DML 同时跑骨架 + YOLO 两个会话会偶发 0x80004005，阴影默认已走 blazepose，
+# 不要再把 DANCEMATE_MASK_BACKEND 设成 yolo。
+ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "dml").strip().lower()
 
 # ONNX 后端每隔多少帧重跑一次人体检测（中间帧沿用上一帧的 ROI，降低耗时）
 # 6 帧太保守：跳舞时人动得快，ROI 过期会导致跟丢/骨架停顿，3 帧折中

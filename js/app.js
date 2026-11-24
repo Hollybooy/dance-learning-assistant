@@ -2265,11 +2265,30 @@ const COACH_VOICE_HINTS = [
   [/huihui|kangkang/i, 0.6],
 ];
 
-function isChineseVoice(voice) {
-  return (
-    /^zh([-_](cn|hans|sg))?/i.test(voice.lang || '') ||
-    /chinese|中文|普通话/i.test(voice.name || '')
-  );
+function voiceLang(voice) {
+  return (voice.lang || '').toLowerCase().replace(/_/g, '-');
+}
+
+/**
+ * 只要普通话音色。
+ * 旧判断 /^zh([-_](cn|hans|sg))?/ 里分组是可选的，等于"以 zh 开头就算"，
+ * 于是 zh-HK（Tracy/Sinji 等粤语音）也会被选进来，播报听起来就是粤语。
+ */
+function isMandarinVoice(voice) {
+  const lang = voiceLang(voice);
+  const name = voice.name || '';
+  if (/(^|-)yue\b|zh-(hk|mo)\b/.test(lang)) return false;
+  if (/cantonese|粤语|粵語|广东话|廣東話|hong\s*kong|香港/i.test(name)) return false;
+  if (lang.startsWith('zh')) return true;
+  return /chinese|中文|普通话|國語|国语/i.test(name);
+}
+
+/** 普通话优先：zh-CN/zh-Hans/zh-SG 最高，zh-TW/zh-Hant（台湾国语）次之。 */
+function mandarinBonus(voice) {
+  const lang = voiceLang(voice);
+  if (lang === 'zh' || /^zh-?(cn|hans|sg)\b/.test(lang)) return 2;
+  if (/^zh-?(tw|hant)\b/.test(lang)) return 1;
+  return 0;
 }
 
 function coachVoiceScore(voice) {
@@ -2279,14 +2298,14 @@ function coachVoiceScore(voice) {
     if (pattern.test(name)) score = weight;
   });
   if (voice.localService === false) score += 0.2; // 在线音通常更自然
-  return score;
+  return score + mandarinBonus(voice);
 }
 
 function loadCoachVoices() {
   if (!('speechSynthesis' in window)) return [];
   coachVoices = window.speechSynthesis
     .getVoices()
-    .filter(isChineseVoice)
+    .filter(isMandarinVoice)
     .sort((a, b) => coachVoiceScore(b) - coachVoiceScore(a));
   return coachVoices;
 }
