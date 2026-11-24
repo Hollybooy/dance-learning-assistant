@@ -114,26 +114,6 @@ class OnnxPoseEngine:
         self._person = persons[int(np.argmax(persons[:, 12]))]
         return self._person
 
-    def _person_from_pose(self, pose, width: int, height: int):
-        """用上一帧骨架的可见点包围盒推算 ROI，跟踪移动，减少检测器调用次数。"""
-        points = [
-            np.array([x * width, y * height], dtype=np.float32)
-            for x, y, _z, visibility in pose
-            if visibility >= 0.3
-        ]
-        if len(points) < 6:
-            return None
-        array = np.stack(points)
-        low, high = array.min(axis=0), array.max(axis=0)
-        center = (low + high) / 2
-        side = max(float(np.max(high - low)), 24.0) * 1.35
-        person = np.zeros(13, dtype=np.float32)
-        person[4:6] = center
-        # 检测器格式里 ROI 边长 = 2 ×(髋部到全身点的距离)
-        person[6:8] = center + np.array([0.0, side / 2], dtype=np.float32)
-        person[12] = 1.0
-        return person
-
     def _infer(self, frame_bgr: np.ndarray):
         """推理入口：单帧出错（DML 偶发 0x80004005 等）时退回上一帧骨架，避免整条链路卡住。"""
         try:
@@ -150,17 +130,23 @@ class OnnxPoseEngine:
     def _infer_inner(self, frame_bgr: np.ndarray):
         self._ensure_model()
         height, width = frame_bgr.shape[:2]
-        person = self._detect_person(frame_bgr)
-        if person is None:
-            self._mask_misses += 1
-            if self._mask_misses >= 6:
-                self._reset_mask()
-            return None, self._mask_png
-        result = self._pose.infer(frame_bgr, person)
+        result = None
+        # ROI 不可靠时（上一帧骨架偏了/人快速移动）姿态模型会给出低置信度结果，
+        # 立刻丢掉缓存的 ROI、重新跑一次检测器再试一帧，避免直接丢人。
+        for _attempt in range(2):
+            person = self._detect_person(frame_bgr)
+            if person is None:
+                self._mask_misses += 1
+                if self._mask_misses >= 6:
+                    self._reset_mask()
+                return None, self._mask_png
+            result = self._pose.infer(frame_bgr, person)
+            if result is not None:
+                break
+            self._person = None
+            self._since_detect = 0
         if result is None:
             self._pose_misses += 1
-            if self._pose_misses >= 2:
-                self._person = None  # 连续失败才重新检测，避免检测器抖动
             self._mask_misses += 1
             if self._mask_misses >= 6:
                 self._reset_mask()
@@ -178,9 +164,9 @@ class OnnxPoseEngine:
             for x, y, z, visibility, _presence in landmarks[:-6]
         ]
         self._last_pose = pose
-        tracked = self._person_from_pose(pose, width, height)
-        if tracked is not None:
-            self._person = tracked
+        # 注意：不要用骨架包围盒反推下一帧 ROI。半身入镜/快速摆臂时
+        # 可见点包围盒会把 ROI 带偏，实测近一半帧姿态置信度不足直接丢人，
+        # 骨架表现为一顿一顿。中间帧沿用检测器给出的 ROI，失败时上面会立即重检。
         if not self._with_segmentation:
             return pose, None
         if self._masker is None:

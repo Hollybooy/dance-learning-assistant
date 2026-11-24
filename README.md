@@ -42,7 +42,7 @@ python run.py
 > 拉语音模型（hf-mirror）。代理默认探测 `127.0.0.1:7890`，需要时用 `DANCEMATE_PROXY` 指定，
 > 想强制纯直连可设 `DANCEMATE_NO_PROXY=1`。依赖统一用清华源直连安装，通常比走代理更快。
 >
-> 实测（本机 CPU，ONNX + BlazePose 阴影，长边 480 输入）：单帧推理约 19ms（p95 34ms），WebSocket 往返约 17ms。
+> 实测（本机 CPU，MediaPipe + BlazePose 阴影，长边 480 输入）：单帧推理约 19ms（p95 28ms），WebSocket 往返约 17ms。
 >
 > 上传的视频会自动用内置 ffmpeg（imageio-ffmpeg）转码为 **H.264 + AAC + faststart**：
 > 微信/手机拍摄的视频常见 HEVC 编码，Chrome 桌面版无法解码（表现为黑屏、进度条不动）。
@@ -114,6 +114,7 @@ python run.py
 | 2 帧在途 | 前端最多同时有 2 帧未回包，吞吐不再被单次往返卡死，端到端延时仍只有一帧左右 |
 | 服务端丢帧 | 新帧到达时若上一帧仍在推理，直接丢弃，链路始终处理最新画面 |
 | 推理串行 | 每个 MediaPipe 实例固定单线程执行器，避免实例并发不安全与 CPU 抢占 |
+| 推理后端 | 默认 `POSE_BACKEND=mediapipe`（VIDEO 模式自带时序跟踪，骨架最稳）；`onnx` 需显式开启 |
 | 轻量模型 | `POSE_MODEL_COMPLEXITY=0`（Lite）；采集保持摄像头原始比例、长边压到 480，JPEG q=0.55 |
 | 阴影复用 | 默认 `MASK_BACKEND=blazepose`：人物掩码直接取姿态模型的分割输出，不再多跑一路 YOLO |
 | 端上绘制 | 服务端只回 33 个关键点 + 96×96 掩码，骨架与阴影由 Canvas 绘制 |

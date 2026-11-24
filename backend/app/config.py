@@ -26,8 +26,13 @@ POSE_MODEL_COMPLEXITY = int(os.getenv("DANCEMATE_POSE_COMPLEXITY", "0"))
 # Tasks API 模型变体：lite / full
 POSE_MODEL_VARIANT = os.getenv("DANCEMATE_POSE_MODEL", "lite")
 
-# 推理后端：auto（有 ONNX Runtime 与模型时用 GPU，否则 MediaPipe）/ mediapipe / onnx
-POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "auto").strip().lower()
+# 推理后端：mediapipe（默认）/ onnx / auto（有 ONNX Runtime 与模型时走 ONNX）
+# 实测同一批录制帧（本机 CPU，含人物分割，120 帧）：
+#   mediapipe  avg 18.6ms / p95 23.7ms / 丢人 0    —— 自带时序跟踪，骨架最稳
+#   onnx       avg 26.5ms / p95 49.7ms / 丢人 ~17%  —— 逐帧独立推理，无时序滤波，
+#              抖动约为 MediaPipe 的 1.6 倍（修掉 ROI 反推之前丢人接近一半）
+# 骨架观感优先，默认走 MediaPipe；要用 ONNX（如需 GPU/CUDA）显式设 onnx。
+POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "mediapipe").strip().lower()
 
 # ONNX Runtime 执行提供程序：cpu（默认）/ dml（DirectML）/ cuda
 # 实测这台机器上 256x256 的姿态模型 CPU 17.5ms/帧、DirectML 36ms/帧，
