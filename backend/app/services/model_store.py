@@ -85,3 +85,50 @@ def onnx_models_ready() -> bool:
         if not target.exists() or target.stat().st_size == 0:
             return False
     return True
+
+
+# Kokoro-82M 中文语音合成（Apache 2.0），模型 325MB + 音色包 28MB
+KOKORO_DIR = MODEL_DIR / "kokoro"
+_KOKORO_RELEASE = (
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+)
+_KOKORO_FILES = {
+    "model": ("kokoro-v1.0.onnx", f"{_KOKORO_RELEASE}/kokoro-v1.0.onnx", "DANCEMATE_KOKORO_MODEL"),
+    "voices": (
+        "voices-v1.0.bin",
+        f"{_KOKORO_RELEASE}/voices-v1.0.bin",
+        "DANCEMATE_KOKORO_VOICES",
+    ),
+}
+
+
+def _kokoro_path(key: str) -> Path:
+    name, _url, env_key = _KOKORO_FILES[key]
+    override = os.getenv(env_key)
+    return Path(override).expanduser() if override else KOKORO_DIR / name
+
+
+def kokoro_models_ready() -> bool:
+    """模型与音色包是否都在本机（大小下限用于识别下载中断的半成品）。"""
+    limits = {"model": 300 * 1024 * 1024, "voices": 20 * 1024 * 1024}
+    for key, minimum in limits.items():
+        target = _kokoro_path(key)
+        if not target.exists() or target.stat().st_size < minimum:
+            return False
+    return True
+
+
+def ensure_kokoro_models() -> tuple[Path, Path]:
+    """返回 (模型, 音色包) 路径，缺失时自动下载（合计约 350MB，只下一次）。"""
+    KOKORO_DIR.mkdir(parents=True, exist_ok=True)
+    resolved = {}
+    hints = {"model": "Kokoro 语音模型（325MB）", "voices": "Kokoro 音色包（28MB）"}
+    for key, (name, url, _env) in _KOKORO_FILES.items():
+        target = _kokoro_path(key)
+        resolved[key] = fetch_file(
+            url_candidates(url),
+            target,
+            timeout=120,
+            hint=f"{hints[key]} {name}（也可手动下载放到 {target}）",
+        )
+    return resolved["model"], resolved["voices"]

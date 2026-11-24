@@ -42,6 +42,8 @@ export class LivePoseStream {
     this.sentAt = 0;
     this._inFlight = 0;
     this._slotWaiters = [];
+    // 每帧的发送时刻，按顺序记录：服务端一帧一回，回包时取最早的一条算真实 RTT
+    this._sendTimes = [];
     this._lastSendAt = 0;
     this._latestMask = null; // 最近解码的人物掩码 ImageBitmap
     this._canvas = document.createElement('canvas');
@@ -187,9 +189,20 @@ export class LivePoseStream {
     }
   }
 
+  /**
+   * 回包到达：取对应那一帧的发送时刻算真实往返（含服务端推理）。
+   * 服务端收到新帧发现上一帧还在推理时会立刻回 skip，所以 skip 可能先于
+   * 上一帧的 pose 到达：pose 配最早的一帧，skip 配最新的一帧。
+   */
+  _takeRtt(forSkip = false) {
+    if (!this._sendTimes.length) return 0;
+    const sentAt = forSkip ? this._sendTimes.pop() : this._sendTimes.shift();
+    return sentAt ? performance.now() - sentAt : 0;
+  }
+
   _handle(message) {
     if (message.type === 'pose') {
-      const rtt = this.sentAt ? performance.now() - this.sentAt : 0;
+      const rtt = this._takeRtt();
       // 掩码异步解码：骨架先走不阻塞显示，位图就位后下一帧起用于绘制阴影
       if (message.mask) {
         const binary = atob(message.mask);
@@ -215,6 +228,7 @@ export class LivePoseStream {
     } else if (message.type === 'skip') {
       // 服务端丢帧（上一帧还在推理）也会回执，收到就释放名额，避免等 ACK 超时才复位
       this.skipped = (this.skipped || 0) + 1;
+      this._takeRtt(true); // 这一帧没有结果，但仍要出队，保证后续 RTT 对齐
       this._releaseSlot();
     } else if (message.type === 'ready') {
       this.onStatus?.(`实时骨架已连接 · 录制 ${message.record_fps}fps`);
@@ -251,6 +265,7 @@ export class LivePoseStream {
   /** 长时间收不到回包（服务端卡住/网络抖动）时复位名额，避免链路停摆 */
   _resetSlots() {
     this._inFlight = 0;
+    this._sendTimes.length = 0; // 丢弃失配的发送时刻，否则 RTT 会一直错位
     const waiters = this._slotWaiters.splice(0);
     waiters.forEach((resolve) => resolve());
   }
@@ -287,6 +302,7 @@ export class LivePoseStream {
       this._lastSendAt = this.sentAt;
       try {
         this.ws.send(blob);
+        this._sendTimes.push(this.sentAt);
       } catch {
         this._releaseSlot();
         await sleep(100);

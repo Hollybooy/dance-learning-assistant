@@ -75,8 +75,10 @@ class OnnxPoseEngine:
             pose_path, det_path = ensure_onnx_pose_models()
             det_net = OrtNet(str(det_path), provider=self._provider)
             pose_net = OrtNet(str(pose_path), provider=self._provider)
-            self._det = MPPersonDet(str(det_path), net=det_net)
-            self._pose = MPPose(str(pose_path), net=pose_net)
+            # 阈值比 Zoo 默认值（0.5）低一档：暗光/半身入镜时 ONNX 静态模型容易
+            # 因置信度差一点就整帧丢弃，放宽后可少丢约 20% 的帧（实测 121→96/322）
+            self._det = MPPersonDet(str(det_path), scoreThreshold=0.35, net=det_net)
+            self._pose = MPPose(str(pose_path), confThreshold=0.3, net=pose_net)
             self.providers = pose_net.providers
             logger.info("ONNX 姿态模型已加载：%s", self.providers)
 

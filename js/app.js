@@ -63,7 +63,6 @@ const DEFAULT_SETTINGS = {
   voiceTips: true,
   voiceCommands: true,
   autoplay: true,
-  coachVoice: 'auto',
   coachRate: 0.98,
   showPerf: false,
 };
@@ -2247,9 +2246,10 @@ function tipTextFor(entry) {
 }
 
 /* 小教练语音播报：浏览器自带 speechSynthesis，不需要后端或联网。
-   音色挑选顺序：Edge 的 Natural 在线音 > 晓晓/晓伊/云希等高质量音 > 婷婷/美佳/Google 中文 >
-   其他中文音；Huihui、Kangkang 这类老式机械音只在没有别的中文音时才用。
-   音色列表由系统异步加载，voiceschanged 时会重刷设置里的下拉。 */
+   音色固定为一个普通话音色，不提供选择（系统里的中文音色名五花八门，
+   用户根本分不清哪个是普通话）。挑选顺序：Edge 的 Natural 在线音 >
+   晓晓/晓伊/云希等高质量音 > 婷婷/美佳/Google 中文 > 其他普通话；
+   粤语（zh-HK/zh-MO/yue）一律排除。音色列表由系统异步加载。 */
 let coachVoices = [];
 let coachVoice = null;
 
@@ -2313,11 +2313,7 @@ function loadCoachVoices() {
 function resolveCoachVoice() {
   if (!('speechSynthesis' in window)) return null;
   const voices = coachVoices.length ? coachVoices : loadCoachVoices();
-  const preferred = state.settings?.coachVoice;
-  if (preferred && preferred !== 'auto') {
-    const picked = voices.find((voice) => voice.voiceURI === preferred || voice.name === preferred);
-    if (picked) return picked;
-  }
+  // 固定用评分最高的那一个普通话音色，不再读设置里的历史选择
   return voices[0] || null;
 }
 
@@ -2325,20 +2321,26 @@ if ('speechSynthesis' in window && window.speechSynthesis.addEventListener) {
   window.speechSynthesis.addEventListener('voiceschanged', () => {
     coachVoices = [];
     coachVoice = resolveCoachVoice();
-    // 语音列表可能比设置面板晚到，到了再补刷一次下拉
-    if (state.route === 'profile') renderSettings();
   });
 }
 
-function speakText(text, { interrupt = true } = {}) {
-  if (!text) return;
+/* 播报优先走后端 Kokoro（固定普通话音色，与系统语音包无关），
+   请求失败/未就绪时回退浏览器 speechSynthesis。
+   合成结果按「语速|文本」缓存成 Blob URL，重复提示不再合成。 */
+const coachTtsCache = new Map();
+const COACH_TTS_CACHE_MAX = 40;
+let coachAudio = null;
+let coachSpeakSeq = 0;
+let coachTtsBlockedUntil = 0; // 服务端不可用后静默 30s，避免每条提示都等超时
+
+function speakLocal(text, rate) {
   if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
   const synth = window.speechSynthesis;
   try {
-    if (interrupt) synth.cancel(); // 新提示打断上一条，避免多条叠加
+    synth.cancel(); // 新提示打断上一条，避免多条叠加
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
-    utterance.rate = Number(state.settings?.coachRate) || 0.98;
+    utterance.rate = rate;
     utterance.pitch = 1.05;
     utterance.volume = 1;
     const voice = coachVoice || resolveCoachVoice();
@@ -2349,12 +2351,60 @@ function speakText(text, { interrupt = true } = {}) {
   }
 }
 
+async function coachTtsUrl(text, rate) {
+  const key = `${rate.toFixed(2)}|${text}`;
+  const cached = coachTtsCache.get(key);
+  if (cached) return cached;
+  if (performance.now() < coachTtsBlockedUntil) throw new Error('tts cooldown');
+  let blob;
+  try {
+    blob = await api.synthesizeSpeech(text, rate);
+  } catch (error) {
+    coachTtsBlockedUntil = performance.now() + 30000;
+    throw error;
+  }
+  const url = URL.createObjectURL(blob);
+  coachTtsCache.set(key, url);
+  if (coachTtsCache.size > COACH_TTS_CACHE_MAX) {
+    const [oldKey, oldUrl] = coachTtsCache.entries().next().value;
+    coachTtsCache.delete(oldKey);
+    URL.revokeObjectURL(oldUrl);
+  }
+  return url;
+}
+
+async function speakText(text, { interrupt = true } = {}) {
+  if (!text) return;
+  const rate = Math.min(2, Math.max(0.5, Number(state.settings?.coachRate) || 1));
+  if (interrupt) stopCoachVoice();
+  const seq = (coachSpeakSeq += 1);
+  try {
+    const url = await coachTtsUrl(text, rate);
+    if (seq !== coachSpeakSeq) return; // 已被更新的提示打断
+    const audio = new Audio(url);
+    coachAudio = audio;
+    audio.onended = () => {
+      if (coachAudio === audio) coachAudio = null;
+    };
+    await audio.play();
+  } catch {
+    if (seq !== coachSpeakSeq) return;
+    speakLocal(text, rate);
+  }
+}
+
 function speakCoachTip(text) {
   if (!state.settings.voiceTips) return;
   speakText(text);
 }
 
 function stopCoachVoice() {
+  coachSpeakSeq += 1; // 让在途的合成请求作废
+  if (coachAudio) {
+    coachAudio.pause();
+    coachAudio.currentTime = 0;
+    coachAudio = null;
+  }
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 }
 
@@ -2807,8 +2857,9 @@ function drawCameraOverlay() {
 
 /**
  * 骨架插值：服务端 ~20fps 回一次结果，绘制循环是 60fps。
- * 每帧把显示骨架朝最新结果挪一多半距离（≈2 帧到位，约 30ms），
- * 兼顾连续和跟手；超过 700ms 没有新结果说明链路卡了/人离开画面，保持原样别乱飘。
+ * 每帧把显示骨架朝最新结果挪 80%（≈2 帧内到位，约 20ms），
+ * 插值本身只负责"补间"，不再额外制造滞后；超过 700ms 没有新结果说明
+ * 链路卡了/人离开画面，先保持原样别乱飘。
  */
 function smoothLivePose() {
   const raw = state.livePoseRaw;
@@ -2817,7 +2868,7 @@ function smoothLivePose() {
     return;
   }
   const stale = performance.now() - state.livePoseAt > 700;
-  state.livePose = stale || !state.livePose ? raw : smoothPose(state.livePose, raw, 0.68);
+  state.livePose = stale || !state.livePose ? raw : smoothPose(state.livePose, raw, 0.8);
 }
 
 function overlayLoop() {
@@ -3945,29 +3996,6 @@ function renderFriends() {
   });
 }
 
-/** 系统语音名又长又带厂商前缀，下拉里只留中文名部分 */
-function shortVoiceName(name) {
-  return String(name || '')
-    .replace(/microsoft|google|online|natural|wavenet|neural/gi, ' ')
-    .replace(/[（(][^)）]*[)）]/g, ' ')
-    .replace(/\s*[-–]\s*(chinese|中文|普通话).*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** 音色下拉：自动（按优先级挑最优中文音）+ 系统里所有中文语音 */
-function coachVoiceOptions() {
-  const voices = coachVoices.length ? coachVoices : loadCoachVoices();
-  const autoLabel = voices.length
-    ? `自动（${shortVoiceName(voices[0].name) || '系统中文音'}）`
-    : '自动（未检测到中文音色）';
-  const options = [['auto', autoLabel]];
-  voices.slice(0, 12).forEach((voice) =>
-    options.push([voice.voiceURI, shortVoiceName(voice.name) || voice.name])
-  );
-  return options;
-}
-
 function renderSettings() {
   const box = $('settings-list');
   if (!box) return;
@@ -3989,13 +4017,6 @@ function renderSettings() {
     { key: 'skeleton', label: '默认显示骨架', type: 'toggle', value: state.settings.skeleton },
     { key: 'shadows', label: '默认显示人物阴影', type: 'toggle', value: state.settings.shadows },
     { key: 'voiceTips', label: '小教练语音提示', type: 'toggle', value: state.settings.voiceTips !== false },
-    {
-      key: 'coachVoice',
-      label: '小教练音色',
-      type: 'select',
-      value: state.settings.coachVoice || 'auto',
-      options: coachVoiceOptions(),
-    },
     {
       key: 'coachRate',
       label: '小教练语速',
@@ -4079,10 +4100,6 @@ function applySetting(key, rawValue) {
   } else if (key === 'voiceTips') {
     syncVisButtons();
     if (!value) stopCoachVoice();
-  } else if (key === 'coachVoice') {
-    coachVoices = loadCoachVoices();
-    coachVoice = resolveCoachVoice();
-    speakText('我是小教练，以后就用这个声音陪你练');
   } else if (key === 'coachRate') {
     speakText('用这个语速说话，听着还舒服吗');
   } else if (key === 'voiceCommands') {

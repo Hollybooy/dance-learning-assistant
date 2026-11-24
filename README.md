@@ -42,7 +42,7 @@ python run.py
 > 拉语音模型（hf-mirror）。代理默认探测 `127.0.0.1:7890`，需要时用 `DANCEMATE_PROXY` 指定，
 > 想强制纯直连可设 `DANCEMATE_NO_PROXY=1`。依赖统一用清华源直连安装，通常比走代理更快。
 >
-> 实测（本机 GTX 1650 Ti，ONNX + DirectML，长边 480 输入）：端到端 p50 约 12ms、p95 约 25ms；同配置纯 CPU 为 p50 20ms / p95 47ms。WebSocket 往返约 17ms。
+> 实测（本机，MediaPipe + BlazePose 阴影，长边 480 输入）：含分割单帧约 18ms（p95 24ms）；同模型 ONNX+DirectML 约 15ms，但暗光下丢帧更多。WebSocket 往返约 17ms。
 >
 > 上传的视频会自动用内置 ffmpeg（imageio-ffmpeg）转码为 **H.264 + AAC + faststart**：
 > 微信/手机拍摄的视频常见 HEVC 编码，Chrome 桌面版无法解码（表现为黑屏、进度条不动）。
@@ -114,7 +114,7 @@ python run.py
 | 2 帧在途 | 前端最多同时有 2 帧未回包，吞吐不再被单次往返卡死，端到端延时仍只有一帧左右 |
 | 服务端丢帧 | 新帧到达时若上一帧仍在推理，直接丢弃，链路始终处理最新画面 |
 | 推理串行 | 每个 MediaPipe 实例固定单线程执行器，避免实例并发不安全与 CPU 抢占 |
-| 推理后端 | 默认 `POSE_BACKEND=onnx` + `ORT_PROVIDER=dml`，用 GPU 跑；没有 DML/CUDA 时自动回退 CPU。想要 MediaPipe 的时序跟踪可设 `mediapipe` |
+| 推理后端 | 默认 `POSE_BACKEND=mediapipe`（VIDEO 模式带跨帧跟踪，暗光下丢帧约为 ONNX 的 1/3）；要跑 GPU 实验设 `onnx` + `ORT_PROVIDER=dml` |
 | 轻量模型 | `POSE_MODEL_COMPLEXITY=0`（Lite）；采集保持摄像头原始比例、长边压到 480，JPEG q=0.55 |
 | 阴影复用 | 默认 `MASK_BACKEND=blazepose`：人物掩码直接取姿态模型的分割输出，不再多跑一路 YOLO |
 | 端上绘制 | 服务端只回 33 个关键点 + 96×96 掩码，骨架与阴影由 Canvas 绘制 |
@@ -191,9 +191,23 @@ ollama pull qwen2.5:1.5b-instruct
 
 完整口令表（含同义说法、主动播报时机、排错步骤）见 [`docs/小教练口令合集.md`](docs/小教练口令合集.md)。
 
-小教练的声音在「设置 → 小教练音色」里选：默认自动挑最自然的中文音（优先 Edge 的 Natural 在线音，
-其次晓晓/晓伊/云希，再次婷婷/美佳/Google 中文，Huihui 这类机械音只在没有别的可选时才用），
-另有语速三档。切换音色会立刻念一句试听。用 Chrome 时系统只暴露老式中文音，想听更自然的声音建议用 Edge 打开。
+小教练的播报默认由**后端本地合成**（Kokoro-82M，ONNX，CPU），音色固定为普通话女声
+`zf_xiaoxiao`，不依赖系统语音包，也不会出现"播成粤语/找不到普通话音色"的问题；设置里只有
+语音开关和语速，没有音色选择。后端未就绪、请求失败或超过 10s 时自动回退浏览器
+`speechSynthesis`。
+
+本地合成是一次性可选安装（`kokoro-onnx` 声明依赖官方 onnxruntime，会覆盖本项目的
+`onnxruntime-directml`，所以必须 `--no-deps`）：
+
+```bash
+pip install --no-deps kokoro-onnx>=0.6.1
+pip install "misaki[zh]>=0.7.4" phonemizer>=3.4 espeakng-loader>=0.2.4
+```
+
+模型（`kokoro-v1.0.onnx` 325MB + `voices-v1.0.bin` 28MB）首次启动时后台下载到
+`backend/models/kokoro/`，也可以手动放进去；下载完成前接口返回 503，前端继续用浏览器音色。
+`GET /api/voice/tts/status` 可查模型是否就绪。
+
 `/api/voice/status` 会返回 `disabled / paused / loading / listening / error` 之一；
 没麦克风、没装依赖或 Ollama 没启动都不影响跟练：前端静默降级，意图解析自动回退规则 + 标题模糊匹配。
 
@@ -343,6 +357,8 @@ WebSocket 协议：
 | `DANCEMATE_WHISPER_MODEL` | whisper-base | 模型目录名，可换 whisper-small |
 | `DANCEMATE_WHISPER_COMPUTE` | int8 | CTranslate2 计算类型 |
 | `DANCEMATE_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 地址 |
+| `DANCEMATE_TTS_BACKEND` | kokoro | 播报引擎：kokoro（本地合成）/ off（只用浏览器语音） |
+| `DANCEMATE_TTS_VOICE` | zf_xiaoxiao | Kokoro 普通话音色（另有 zf_xiaobei/zf_xiaoni/zm_yunxi 等） |
 | `DANCEMATE_OLLAMA_MODEL` | qwen2.5:1.5b-instruct | 意图解析模型 |
 | `DANCEMATE_PROXY` | 自动探测 `127.0.0.1:7890` | 模型下载代理（仅镜像/官方源都慢时使用）|
 | `DANCEMATE_HF_ENDPOINT` | `https://hf-mirror.com` | HuggingFace 镜像 |

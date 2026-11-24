@@ -7,3 +7,8 @@ numpy>=1.26,<3
 imageio-ffmpeg>=0.5
 # Windows 本地：DirectML 版 ONNX Runtime（GPU 推理，无需 CUDA）；Docker/Linux 跳过
 onnxruntime-directml>=1.24; sys_platform == "win32"
+
+# 本地语音合成（可选）：kokoro-onnx 声明依赖官方 onnxruntime，会覆盖本项目的 onnxruntime-directml，
+# 必须 --no-deps 安装，由 onnxruntime-directml 提供 onnxruntime 模块：
+#   pip install --no-deps kokoro-onnx>=0.6.1
+#   pip install "misaki[zh]>=0.7.4" phonemizer>=3.4 espeakng-loader>=0.2.4

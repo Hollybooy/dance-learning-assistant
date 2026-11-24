@@ -47,6 +47,26 @@ export const api = {
   deleteSession: (id) =>
     fetch(apiUrl(`/api/sessions/${id}`), { method: 'DELETE' }).then(parse),
 
+  /**
+   * 本地 Kokoro 语音合成：返回 WAV Blob。
+   * 10s 超时（含首次加载模型），失败由调用方回退浏览器 speechSynthesis。
+   */
+  synthesizeSpeech(text, speed = 1.0) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    return fetch(apiUrl('/api/voice/tts'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, speed }),
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`TTS ${res.status}`);
+        return res.blob();
+      })
+      .finally(() => clearTimeout(timer));
+  },
+
   /** 带进度的上传（XHR 便于展示进度）。 */
   uploadVideo(file, onProgress) {
     return new Promise((resolve, reject) => {

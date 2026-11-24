@@ -26,12 +26,13 @@ POSE_MODEL_COMPLEXITY = int(os.getenv("DANCEMATE_POSE_COMPLEXITY", "0"))
 # Tasks API 模型变体：lite / full
 POSE_MODEL_VARIANT = os.getenv("DANCEMATE_POSE_MODEL", "lite")
 
-# 推理后端：onnx（默认，走 GPU）/ mediapipe / auto（有 ONNX Runtime 与模型时走 ONNX）
-# 实测同一批录制帧（本机 GTX 1650 Ti，含人体检测，交替两轮）：
-#   纯姿态网络 p50：CPU 16.2ms / DirectML 10.4ms
-#   端到端   p50：CPU 20.3ms / DirectML 11.8ms，p95 47ms → 25ms
-# ONNX 逐帧独立推理、无时序滤波，抖动比 MediaPipe 略大，靠 PoseStabilizer 压制。
-POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "onnx").strip().lower()
+# 推理后端：mediapipe（默认）/ onnx / auto（有 ONNX Runtime 与模型时走 ONNX）
+# 暗光实测（同一段夜间练习录像 322 帧，人体检测+姿态，逐帧统计"完全无结果"）：
+#   MediaPipe  丢 40 帧（12%），avg 17.7ms —— VIDEO 模式带跨帧跟踪，抓不住时会沿用 ROI
+#   ONNX+DML   丢 122 帧（38%），avg 14.7ms —— 逐帧独立推理，暗光/头部出画/动态模糊下直接失败
+# GPU 只快 3ms，却多丢 2.4 倍的帧，实时跟练观感明显更差，所以默认仍用 MediaPipe。
+# 显存/算力充足、或换成更大模型（RTMPose 等）时再显式设 onnx。
+POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "mediapipe").strip().lower()
 
 # ONNX Runtime 执行提供程序：dml（默认，Windows GPU）/ cuda / cpu
 # 运行时没有对应 EP 会自动回退 CPU（见 onnx_pose/ort_net.py），跨平台安全。
@@ -62,6 +63,11 @@ WHISPER_MODEL = os.getenv("DANCEMATE_WHISPER_MODEL", "whisper-base").strip()
 WHISPER_COMPUTE = os.getenv("DANCEMATE_WHISPER_COMPUTE", "int8").strip()
 OLLAMA_URL = os.getenv("DANCEMATE_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("DANCEMATE_OLLAMA_MODEL", "qwen2.5:1.5b-instruct").strip()
+
+# 中文语音合成（播报）：kokoro（本地 Kokoro-82M，固定普通话音色，不依赖系统语音包）/ off
+# 音色：zf_xiaoxiao（女声，标准普通话）；另有 zf_xiaobei/zf_xiaoni/zf_xiaoyi、zm_yunxi 等
+TTS_BACKEND = os.getenv("DANCEMATE_TTS_BACKEND", "kokoro").strip().lower()
+TTS_VOICE = os.getenv("DANCEMATE_TTS_VOICE", "zf_xiaoxiao").strip() or "zf_xiaoxiao"
 
 # 关键点可见度阈值
 POSE_MIN_VISIBILITY = float(os.getenv("DANCEMATE_POSE_MIN_VIS", "0.3"))

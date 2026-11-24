@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 import numpy as np
@@ -19,8 +20,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api import sessions, videos, voice, ws_practice
-from .config import DATA_DIR, FRONTEND_DIR, ensure_dirs
+from .config import DATA_DIR, FRONTEND_DIR, TTS_BACKEND, ensure_dirs
 from .services.pose_engine import live_pose_engine
+from .services.tts import tts
 from .services.voice_assistant import voice_assistant
 
 logging.basicConfig(
@@ -41,6 +43,9 @@ async def lifespan(_: FastAPI):
         await asyncio.to_thread(_warmup_pose_engine)
     except Exception:  # noqa: BLE001
         logging.getLogger("dancemate.startup").exception("姿态引擎预热失败，首帧会稍慢")
+    if TTS_BACKEND == "kokoro":
+        # 后台加载 Kokoro（首次还可能要下 350MB），不拖慢启动；未就绪时前端用浏览器语音
+        threading.Thread(target=tts.warm, name="tts-warm", daemon=True).start()
     await voice_assistant.start()
     yield
     voice_assistant.stop()

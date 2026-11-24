@@ -262,10 +262,10 @@ class PoseStabilizer:
     PER_JOINT_LIMIT = 0.45  # 单关节最大跳变（超过则钳制，写实快速摆臂也难超过）
     MAX_HOLD_DRIFT = 1      # 连续漂移帧沿用上一帧的上限（2 帧 = 100ms 静止，肉眼看得出滞后）
     HOLD_SECONDS = 0.5      # 丢帧补齐的最长时长
-    ALPHA_MIN = 0.5         # 静止时的平滑系数（旧值 0.35 意味着约 90ms 跟随滞后）
-    ALPHA_MAX = 0.9         # 快速动作时的平滑系数（越大越跟手）
-    HAND_ALPHA_CAP = 0.35   # 手部点平滑上限：手腕/手指识别噪声大（"抽搐"），
-                            # 比其它关节多留一点平滑，但不能压到 0.22 那样明显拖手
+    ALPHA_MIN = 0.68        # 静止时的平滑系数：25fps 下跟随滞后约 19ms（0.35 时约 90ms）
+    ALPHA_MAX = 0.95        # 快速动作时的平滑系数（越大越跟手）
+    HAND_ALPHA_CAP = 0.5    # 手部点平滑上限：手腕/手指噪声大，比其它关节多留一点平滑，
+                            # 但不能压到 0.22 那样明显拖手
     # 核心关节：头/肩/肘/腕/髋/膝/踝——漂移检测只看这些，
     # 避免大量低可见度或静止点稀释中位数信号
     CORE_JOINTS = (0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
@@ -316,7 +316,7 @@ class PoseStabilizer:
         self._drift_streak = 0
 
         # 自适应平滑：动得越快越跟手，动得越慢越稳
-        alpha = min(self.ALPHA_MAX, self.ALPHA_MIN + jump * 8.0)
+        alpha = min(self.ALPHA_MAX, self.ALPHA_MIN + jump * 12.0)
         out: List[List[float]] = []
         for i, (cur, old) in enumerate(zip(pose, self._prev)):
             if not cur:
