@@ -2507,8 +2507,9 @@ function findVideoByVoice(query) {
 }
 
 const COACH_HELP_TEXT =
-  '可以说：暂停、继续、下一段、上一段、重播、开始跟练、显示骨架、隐藏阴影、' +
-  '快一点、慢一点、原速、开始录制、结束录制、进度、收藏、安静，或者直接说课程名字。';
+  '可以说：暂停、继续、下一段、上一段、重播、从头重新播放、开始跟练、自动播放、手动播放、' +
+  '显示骨架、隐藏阴影、快一点、慢一点、原速、开始录制、结束录制、进度、收藏、安静，' +
+  '或者直接说课程名字。';
 
 /** 指令的统一入口：分支里自己播报的返回 'silent'，其余沿用后端回复文案 */
 async function runVoiceCommand(message) {
@@ -2577,6 +2578,35 @@ async function handleVoiceCommand(message) {
   if (action === 'speed_up' || action === 'speed_down' || action === 'speed_normal') {
     setSpeed(action === 'speed_normal' ? 1 : stepSpeed(action === 'speed_up' ? 1 : -1));
     return;
+  }
+
+  if (action === 'autoplay_on' || action === 'autoplay_off') {
+    applySetting('autoplay', action === 'autoplay_on');
+    return; // 结果由后端 reply 播报
+  }
+
+  if (action === 'toggle_autoplay') {
+    const next = state.settings.autoplay === false;
+    applySetting('autoplay', next);
+    speakCoachTip(next ? '已切换成自动播放' : '已切换成手动播放');
+    return 'silent';
+  }
+
+  if (action === 'restart_video') {
+    if (!state.video) {
+      toast('先选一个课程再重新播放');
+      return 'silent';
+    }
+    if (state.route !== 'learning') {
+      navigate('#/learning'); // 进入跟练页本来就从第 1 段开始播
+    } else if (state.segments.length) {
+      playSegment(0);
+    } else {
+      teachVideo.currentTime = 0;
+      teachVideo.play().catch(() => {});
+    }
+    speakCoachTip(`从头重新播放《${state.video.title}》`);
+    return 'silent';
   }
 
   if (action === 'record_start' || action === 'record_stop') {

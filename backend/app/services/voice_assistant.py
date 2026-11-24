@@ -41,9 +41,9 @@ from .video_store import video_store
 logger = logging.getLogger("dancemate.voice")
 
 _INITIAL_PROMPT = (
-    "小教练，暂停，继续播放，上一片段，下一片段，重播本段，开始跟练，"
+    "小教练，暂停，继续播放，上一片段，下一片段，重播本段，从头重新播放，开始跟练，"
     "显示骨架，隐藏阴影，快一点，慢一点，原速，开始录制，结束录制，"
-    "现在进度怎么样，收藏这个课程，安静一点，你会什么，"
+    "改成自动播放，改成手动播放，现在进度怎么样，收藏这个课程，安静一点，你会什么，"
     "播放古风燃脂第一课，播放 Hip-Hop 律动入门。"
 )
 
@@ -61,6 +61,8 @@ _ACTION_REPLY = {
     "speed_up": "好，加快一点",
     "speed_down": "好，放慢一点",
     "speed_normal": "恢复原速",
+    "autoplay_on": "好，本段播完自动进入下一段",
+    "autoplay_off": "好，播完停在原地等你切换",
     "unmute_coach": "语音提示已恢复",
     # 下面这些由前端自己播报（要报具体数字/状态），这里留空避免说两遍
     "record_start": "",
@@ -142,6 +144,16 @@ def parse_rule_intent(query: str) -> Optional[Dict[str, Any]]:
     if any(key in q for key in ("帮助", "会什么", "能做什么", "指令", "怎么用")):
         return {"action": "help"}
 
+    # 播放模式与整段重播：要在「重播=重播本段」「播放=选课程」之前判断
+    if any(key in q for key in ("切换自动", "切换手动", "切换播放模式", "换个播放模式")):
+        return {"action": "toggle_autoplay"}
+    if any(key in q for key in ("自动播放", "自动连播", "改成自动", "换成自动", "开启自动", "打开自动")):
+        return {"action": "autoplay_on"}
+    if any(key in q for key in ("手动播放", "手动连播", "改成手动", "换成手动", "关闭自动", "不要自动", "别自动")):
+        return {"action": "autoplay_off"}
+    if any(key in q for key in ("从头重新播放", "从头开始播", "从头播放", "重新播放", "重新开始", "从头来")):
+        return {"action": "restart_video"}
+
     if any(key in q for key in ("暂停", "停一下", "先停", "别放")):
         return {"action": "pause"}
     if any(key in q for key in ("继续", "接着", "恢复")):
@@ -216,6 +228,7 @@ def _ollama_intent(query: str, titles: List[str]) -> Optional[Dict[str, Any]]:
         "restart_segment、start_practice、skeleton_on、skeleton_off、"
         "shadow_on、shadow_off、speed_up、speed_down、speed_normal、"
         "record_start、record_stop、report_progress、mute_coach、unmute_coach、"
+        "autoplay_on、autoplay_off、toggle_autoplay、restart_video、"
         "favorite、help、none。"
         f"\n课程标题列表：\n{title_list}"
     )

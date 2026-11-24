@@ -213,6 +213,9 @@
 - 自动：本段播完 → 角标提示「即将自动播放第 N 段」→ 0.9 秒后 `playSegment(next)`，最后一段提示「全部片段已完成」。
 - 手动：保持原先「停在原地等你切换」的行为。
 - 录制、手动切段、离开页面都会先 `clearTimeout(autoplayTimer)`，避免定时器把人从录制里拽走。
+- 语音同步支持：「改成自动播放 / 改成手动播放 / 切换播放模式」（`autoplay_on` / `autoplay_off` / `toggle_autoplay`）、
+  「从头重新播放 / 从头来」（`restart_video`，回到第 1 段）。规则放在「重播本段」「播放某课程」之前，
+  避免「重新播放」被 `restart_segment`、「自动播放」被 `play_video` 抢走。
 
 ### 其他改动
 
