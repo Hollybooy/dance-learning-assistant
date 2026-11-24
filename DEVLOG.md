@@ -85,6 +85,7 @@
 | 12 | 人物阴影铺满整个画面 | 灰度 PNG 的形状信息在**亮度**通道，而 Canvas `source-in` 合成只认 **alpha** → 整帧不透明 | 后端改存 RGBA（RGB 全白、A=掩码） |
 | 13 | **回放时阴影持续闪烁** | 顺序播放每帧掩码 key 都不同 → LRU 命中率为 0；异步解码跟不上 24fps → 解不出的帧跳过阴影 | 预解码后续 36 帧 + 缓存容量 180→600 + 未就绪沿用上一帧轮廓 + 暂停补画 |
 | 14 | **History 里部分演示回放整片黑屏** | 内置课程素材是 HEVC(hvc1)，Chrome/Edge 桌面端没有 HEVC 解码器，`<video>` 不报错、直接黑屏 | 6 个 `*-back.mp4` 转 H.264（High / CRF26 / +faststart，体积与原 HEVC 接近）；同时删掉无引用的 `using_total.mp4` 与 8 张 hero 图 |
+| 15 | **实时骨架周期性卡住、延迟高** | ①服务端丢帧（上一帧还在推理）时**不回包**，前端在途名额卡到 1 秒超时才复位 → 每隔一秒卡一下；②DirectML 同时跑骨架和 YOLO 两个会话会偶发 `0x80004005`，异常直接吞掉整帧；③阴影每 2 帧跑一次 YOLO640（约 90ms）抢走一半算力；④检测间隔 6 帧，跳舞时 ROI 过期跟丢 | 丢帧补回执 `{"type":"skip"}`，前端收到即释放名额；默认 provider 改 CPU（实测 17.5ms vs DML 36ms）；阴影间隔 2→4、检测间隔 6→3；单帧推理异常时沿用上一帧骨架并重置 ROI，日志 5 秒一条。压测：25fps 推流 12 秒，回骨架 244/253，服务端 avg 24ms、p95 48ms，骨架间隔 max 144ms |
 
 ---
 
@@ -207,7 +208,7 @@
 
 ### 其他改动
 
-- `ORT_DETECT_INTERVAL` 默认 2 → 6（人体检测隔 6 帧重跑，中间帧复用 ROI）；
-  `YOLO_MASK_INTERVAL` 默认 3 → 2（阴影更跟手）。
+- `ORT_DETECT_INTERVAL` 默认 2 → 6，后因跟手问题改回 3（中间帧复用 ROI）；
+  `YOLO_MASK_INTERVAL` 默认 3 → 2，后因算力争抢改为 4。
 - `download_onnx_models.py` / `download_whisper_model.py`：一条命令拉齐模型，失败自动换路由。
 - Whisper 模型 id 修正：`whisper-base` 之前会被拼成 `Systran/faster-whisper-whisper-base`。

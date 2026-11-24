@@ -29,18 +29,22 @@ POSE_MODEL_VARIANT = os.getenv("DANCEMATE_POSE_MODEL", "lite")
 # 推理后端：auto（有 ONNX Runtime 与模型时用 GPU，否则 MediaPipe）/ mediapipe / onnx
 POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "auto").strip().lower()
 
-# ONNX Runtime 执行提供程序：dml（Windows DirectML，默认）/ cuda / cpu
-ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "dml").strip().lower()
+# ONNX Runtime 执行提供程序：cpu（默认）/ dml（DirectML）/ cuda
+# 实测这台机器上 256x256 的姿态模型 CPU 17.5ms/帧、DirectML 36ms/帧，
+# 且 DML 同时跑骨架 + YOLO 两路时会偶发 0x80004005 直接抛异常（骨架卡住），所以默认 CPU。
+ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "cpu").strip().lower()
 
 # ONNX 后端每隔多少帧重跑一次人体检测（中间帧沿用上一帧的 ROI，降低耗时）
-ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "6")))
+# 6 帧太保守：跳舞时人动得快，ROI 过期会导致跟丢/骨架停顿，3 帧折中
+ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "3")))
 
 # 人物阴影来源：blazepose（与骨架同一次推理，默认）或 yolo（YOLO26n-seg）
 MASK_BACKEND = os.getenv("DANCEMATE_MASK_BACKEND", "yolo").strip().lower()
 
 # YOLO 分割模型输入尺寸与更新间隔（按帧计，中间帧复用上一张掩码）
+# 640 输入单次约 90ms，每 2 帧跑一次会吃掉一半算力，阴影是装饰性的，4 帧一次足够跟手
 YOLO_IMGSZ = int(os.getenv("DANCEMATE_YOLO_IMGSZ", "640"))
-YOLO_MASK_INTERVAL = max(1, int(os.getenv("DANCEMATE_YOLO_MASK_INTERVAL", "2")))
+YOLO_MASK_INTERVAL = max(1, int(os.getenv("DANCEMATE_YOLO_MASK_INTERVAL", "4")))
 
 # 本地语音助手：麦克风常驻 + 唤醒词 + faster-whisper + Ollama 意图解析
 VOICE_ENABLED = os.getenv("DANCEMATE_VOICE", "1").strip() != "0"

@@ -206,6 +206,10 @@ export class LivePoseStream {
         dropped: message.dropped ?? 0,
       });
       this._releaseSlot();
+    } else if (message.type === 'skip') {
+      // 服务端丢帧（上一帧还在推理）也会回执，收到就释放名额，避免等 ACK 超时才复位
+      this.skipped = (this.skipped || 0) + 1;
+      this._releaseSlot();
     } else if (message.type === 'ready') {
       this.onStatus?.(`实时骨架已连接 · 录制 ${message.record_fps}fps`);
     } else if (message.type === 'record_started') {

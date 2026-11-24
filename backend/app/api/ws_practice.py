@@ -66,8 +66,13 @@ async def practice_socket(ws: WebSocket) -> None:
         if state["closed"]:
             return
         if state["busy"]:
-            # 上一帧还在推理 → 丢弃，保证端到端只有 1 帧延时
+            # 上一帧还在推理 → 丢弃，保证端到端只有 1 帧延时。
+            # 但仍要回执：前端按「一帧一回」释放在途名额，不回执会让名额卡到超时才复位（表现为画面卡住）
             state["dropped"] += 1
+            try:
+                await send_json({"type": "skip", "dropped": state["dropped"]})
+            except Exception:  # noqa: BLE001 - 连接已断
+                state["closed"] = True
             return
         state["busy"] = True
         try:

@@ -50,6 +50,9 @@ class OnnxPoseEngine:
         self._det: Optional[MPPersonDet] = None
         self._person: Optional[np.ndarray] = None
         self._since_detect = 0
+        # 单帧推理失败时沿用上一帧骨架，画面不闪断；错误日志 5 秒最多一条
+        self._last_pose = None
+        self._last_error_at = 0.0
         self._masker = None
         self._mask_png: Optional[bytes] = None
         self._since_mask = 0
@@ -132,6 +135,19 @@ class OnnxPoseEngine:
         return person
 
     def _infer(self, frame_bgr: np.ndarray):
+        """推理入口：单帧出错（DML 偶发 0x80004005 等）时退回上一帧骨架，避免整条链路卡住。"""
+        try:
+            return self._infer_inner(frame_bgr)
+        except Exception as exc:  # noqa: BLE001 - 一帧失败不能中断实时链路
+            now = time.time()
+            if now - self._last_error_at > 5:
+                self._last_error_at = now
+                logger.warning("单帧推理失败（%s: %s），沿用上一帧结果", type(exc).__name__, exc)
+            self._person = None
+            self._since_detect = 0
+            return self._last_pose, self._mask_png
+
+    def _infer_inner(self, frame_bgr: np.ndarray):
         self._ensure_model()
         height, width = frame_bgr.shape[:2]
         person = self._detect_person(frame_bgr)
@@ -161,6 +177,7 @@ class OnnxPoseEngine:
             ]
             for x, y, z, visibility, _presence in landmarks[:-6]
         ]
+        self._last_pose = pose
         tracked = self._person_from_pose(pose, width, height)
         if tracked is not None:
             self._person = tracked
