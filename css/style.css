@@ -590,6 +590,31 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 
 .topbar__tools { display: flex; align-items: center; gap: 8px; margin-left: 22px; }
 
+.voice-btn { position: relative; flex: 0 0 auto; }
+.voice-btn[aria-pressed='false'] { opacity: 0.55; }
+.voice-btn.is-live {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border-color: rgba(29, 181, 107, 0.42);
+}
+.voice-btn.is-live::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand-2);
+  box-shadow: 0 0 0 0 rgba(29, 181, 107, 0.5);
+  animation: voice-pulse 1.8s ease-out infinite;
+}
+@keyframes voice-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(29, 181, 107, 0.45); }
+  70% { box-shadow: 0 0 0 7px rgba(29, 181, 107, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(29, 181, 107, 0); }
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1162,22 +1187,46 @@ body.is-home .home-dock { display: block; }
 
 .detail {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  /* 视频列由原始宽高比决定宽度，右侧信息列只收缩到可读下限，避免缩放时互相挤压 */
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 520px);
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 18px;
-  max-width: 1180px;
+  width: min(1180px, 100%);
   height: 100%;
+  min-width: 0;
   margin: 0 auto;
+  justify-content: center;
 }
 .detail__cover {
   position: relative;
-  min-height: 0;
+  aspect-ratio: var(--media-ratio, 9 / 16);
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  justify-self: center;
   border-radius: var(--radius-xl);
   overflow: hidden;
   background: linear-gradient(150deg, #d5e6d6, #8fb79a);
   box-shadow: var(--shadow-lg);
 }
-.detail__cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 竖屏：高度撑满，宽度由比例反推；横屏：宽度撑满，高度由比例反推 */
+.detail__cover.is-portrait {
+  width: auto;
+  height: 100%;
+}
+.detail__cover.is-landscape {
+  width: 100%;
+  height: auto;
+}
+.detail__cover img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  object-fit: contain;
+  display: block;
+}
 .detail__cover::after {
   content: '';
   position: absolute;
@@ -1217,9 +1266,16 @@ body.is-home .home-dock { display: block; }
   border: 1px solid var(--line);
   box-shadow: var(--shadow-sm);
   overflow-y: auto;
+  min-width: 0;
 }
 .detail__panel h2 { font-size: 26px; letter-spacing: -0.02em; font-weight: 700; }
-.detail__panel h3 { margin-top: 16px; font-size: 19px; font-weight: 600; line-height: 1.35; }
+.detail__panel h3 {
+  margin-top: 16px;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .detail__desc { margin-top: 14px; font-size: 14px; line-height: 1.8; color: var(--muted); }
 .detail__facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
 .detail__facts li {
@@ -2296,8 +2352,7 @@ body.is-home .home-dock { display: block; }
 @media (max-width: 1240px) {
   .shell { grid-template-columns: 250px minmax(0, 1fr); }
   .class-rail { width: 278px; }
-  .detail { height: auto; }
-  .detail__cover { min-height: 380px; }
+  .detail { grid-template-columns: minmax(0, 1fr) minmax(280px, 420px); }
 }
 
 @media (max-width: 960px) {
@@ -2376,8 +2431,21 @@ body.is-home .home-dock { display: block; }
   .class-rail { position: static; width: auto; margin: 14px; background: var(--surface); }
   .classes__search { position: static; width: auto; margin: 0 14px 14px; }
 
-  .detail { grid-template-columns: 1fr; height: auto; }
-  .detail__cover { min-height: 300px; }
+  /* 窄屏/高缩放下改为纵向排列：视频保持原始比例，信息面板与按钮依次下移 */
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    width: 100%;
+    height: auto;
+    justify-content: stretch;
+  }
+  .detail__cover {
+    width: min(100%, 460px);
+    height: auto;
+    max-width: 100%;
+    aspect-ratio: var(--media-ratio, 9 / 16);
+    justify-self: center;
+  }
   .detail__actions { grid-template-columns: 1fr; }
 
   .about-grid { grid-template-columns: 1fr; }
@@ -3172,5 +3240,33 @@ body.is-home .home-dock { display: block; }
   .stage__dock { bottom: 62px; width: calc(100% - 16px); }
   .stage__dock .dock-row { gap: 7px; }
   .stage.is-overlay .stage__pane--cam { width: 120px; bottom: 150px; }
+}
+
+/* ==========================================================================
+   课程详情：按可用宽度切换横排 / 竖排
+   浏览器缩放会同时改变内容和窗口宽度，用容器查询比媒体查询更稳：
+   只要右侧信息列放不下，就整块改为竖向排列，视频保持原始比例。
+   ========================================================================== */
+
+#view-class {
+  container-type: inline-size;
+  container-name: classview;
+}
+
+@container classview (max-width: 660px) {
+  .detail {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    width: 100%;
+    height: auto;
+    justify-content: stretch;
+  }
+  .detail__cover {
+    width: min(100%, 520px);
+    height: auto;
+    aspect-ratio: var(--media-ratio, 9 / 16);
+    justify-self: center;
+  }
+  .detail__actions { grid-template-columns: 1fr; }
 }
 

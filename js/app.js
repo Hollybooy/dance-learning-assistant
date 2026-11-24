@@ -57,9 +57,10 @@ const DEFAULT_SETTINGS = {
   skeleton: true,
   shadows: true,
   countdown: 3,
-  autoplayNext: true,
+  autoplayNext: false,
   dockDelay: 1500,
   voiceTips: true,
+  voiceCommands: true,
   showPerf: false,
 };
 
@@ -203,7 +204,7 @@ function loadSettings() {
     return {
       ...DEFAULT_SETTINGS,
       ...raw,
-      autoplayNext: true,
+      autoplayNext: false,
       showPerf: localStorage.getItem(PERF_KEY) === '1',
     };
   } catch {
@@ -519,6 +520,33 @@ function probeDuration(src) {
     probe.addEventListener('loadedmetadata', () => done(Number(probe.duration) || 0), { once: true });
     probe.addEventListener('error', () => done(0), { once: true });
     setTimeout(() => done(0), 8000);
+    probe.src = src;
+  });
+}
+
+/** 读取视频真实分辨率（封面缩略图可能被裁切，不能代表原始比例） */
+const videoSizeCache = new Map();
+
+function probeVideoSize(src) {
+  return new Promise((resolve) => {
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.muted = true;
+    let settled = false;
+    const done = (width, height) => {
+      if (settled) return;
+      settled = true;
+      probe.removeAttribute('src');
+      probe.load();
+      resolve({ width: Number(width) || 0, height: Number(height) || 0 });
+    };
+    probe.addEventListener(
+      'loadedmetadata',
+      () => done(probe.videoWidth, probe.videoHeight),
+      { once: true }
+    );
+    probe.addEventListener('error', () => done(0, 0), { once: true });
+    setTimeout(() => done(0, 0), 8000);
     probe.src = src;
   });
 }
@@ -1218,6 +1246,50 @@ async function selectVideo(meta) {
   }
 }
 
+function setDetailCoverRatio(ratio) {
+  const cover = $('detail-cover');
+  if (!cover) return;
+  if (ratio > 0.2 && ratio < 5) {
+    cover.style.setProperty('--media-ratio', ratio.toFixed(4));
+    // 竖屏用高度撑满，横屏用宽度撑满，避免任何方向被拉伸
+    cover.classList.toggle('is-portrait', ratio < 0.85);
+    cover.classList.toggle('is-landscape', ratio >= 0.85);
+  } else {
+    cover.style.removeProperty('--media-ratio');
+    cover.classList.remove('is-portrait', 'is-landscape');
+  }
+}
+
+function syncDetailRatio() {
+  const image = $('detail-cover-img');
+  if (!image) return;
+  const apply = () => {
+    const ratio = image.naturalWidth && image.naturalHeight ? image.naturalWidth / image.naturalHeight : 0;
+    setDetailCoverRatio(ratio);
+  };
+  if (image.complete && image.naturalWidth) apply();
+  else image.addEventListener('load', apply, { once: true });
+}
+
+function syncDetailVideoRatio(meta) {
+  if (!meta) return;
+  const src = meta.local
+    ? state.segments[0]?.src || meta.video || ''
+    : api.streamUrl(meta.id);
+  if (!src) return;
+  const cached = videoSizeCache.get(meta.id);
+  if (cached) {
+    setDetailCoverRatio(cached.width / cached.height);
+    return;
+  }
+  probeVideoSize(src).then(({ width, height }) => {
+    if (!width || !height) return;
+    videoSizeCache.set(meta.id, { width, height });
+    if (state.video?.id !== meta.id) return;
+    setDetailCoverRatio(width / height);
+  });
+}
+
 function renderDetail() {
   const meta = state.video;
   if (!meta) {
@@ -1238,6 +1310,8 @@ function renderDetail() {
   $('detail-cover').style.background = cover
     ? '#dfe8dc'
     : 'linear-gradient(150deg, #1db56b, #0c6b39)';
+  syncDetailRatio();
+  syncDetailVideoRatio(meta);
 
   $('detail-title').textContent = meta.title;
   $('detail-meta').textContent = `${formatTime(meta.duration)} · ${state.segments.length} 个片段`;
@@ -1397,6 +1471,7 @@ async function playSegment(index) {
   const token = ++segmentPlayToken;
   segmentTransition = true;
   state.current = index;
+  setTeachBadge('');
   highlightFilm();
   updateSegIndicator();
   teachVideo.playbackRate = state.speed || 1;
@@ -1447,10 +1522,10 @@ function handleSegmentEnd(fromEnded = false) {
     return;
   }
   if (state.segments.length) {
-    const next = (state.current + 1) % state.segments.length;
-    setTimeout(() => {
-      if (segmentEndLocked) playSegment(next);
-    }, 60);
+    // 本段播完停在原地，等用户手动选下一段；保持控制条可见
+    showDock();
+    clearTimeout(dockHideTimer);
+    setTeachBadge('本段结束 · 手动切下一段');
   }
 }
 
@@ -2079,36 +2154,36 @@ function tipTextFor(entry) {
   const tooBig = b > a * 1.6;
 
   if (region.key === 'head') {
-    if (low) return '头再抬起来一点，视线跟上老师就更好啦';
-    if (high) return '头稍微收一点，和老师的轮廓对齐';
-    if (side) return `头再${side}靠一点，马上就重合了`;
+    if (low) return '头再向上抬一点，视线跟上老师就更好啦';
+    if (high) return '头稍微向下收一点，和老师的轮廓对齐';
+    if (side) return `头再${side}一点，马上就重合了`;
     return '头的位置很贴近了，保持住';
   }
 
   if (region.key === 'hip') {
-    if (low) return '腰部再提一点，重心跟上老师';
-    if (high) return '腰稍微沉一点，和老师的姿势对齐';
+    if (low) return '腰部再向上提一点，重心跟上老师';
+    if (high) return '腰稍微向下沉一点，和老师的姿势对齐';
     if (side) return `腰再${side}带一点，轮廓就贴合了`;
     if (tooBig) return '腰部幅度收一点，别超过阴影';
     return '腰腹位置很稳，继续保持';
   }
 
   if (region.key.endsWith('leg')) {
-    if (low) return `${name}再抬起来一些，幅度跟上老师`;
-    if (high) return `${name}稍微收一点，注意和老师对齐`;
+    if (low) return `${name}再向上抬一些，幅度跟上老师`;
+    if (high) return `${name}稍微向下收一点，注意和老师对齐`;
     if (side) return `${name}再${side}带一点，轮廓就重合了`;
     if (tooBig) return `${name}幅度收一点，别超出阴影`;
-    if (cover < 0.4) return `${name}再展开一点，跟住老师的幅度`;
-    return `${name}再稍微抬高一点点就贴合了`;
+    if (cover < 0.4) return `${name}再伸展开一点，跟住老师的幅度`;
+    return `${name}再向上抬高一点点就贴合了`;
   }
 
   // 手臂（用户反馈最容易出现"低于阴影"的部位）
-  if (low) return `${name}再抬高一点点，就快贴合了！`;
-  if (high) return `${name}稍微放低一点，和老师的轮廓对齐`;
+  if (low) return `${name}再向上抬一点点，就快贴合了！`;
+  if (high) return `${name}稍微向下放一点，和老师的轮廓对齐`;
   if (side) return `${name}再${side}带一点，轮廓就越贴越近了`;
   if (tooBig) return `${name}幅度收一点，别超出阴影`;
   if (cover < 0.4) return `${name}再伸展开一些，跟上老师的幅度`;
-  return `${name}再抬高一点点就贴合了`;
+  return `${name}再向上抬高一点点就贴合了`;
 }
 
 /* 小教练语音播报：用浏览器自带的 speechSynthesis，不需要后端或联网。
@@ -2129,8 +2204,7 @@ if ('speechSynthesis' in window && window.speechSynthesis.addEventListener) {
   });
 }
 
-function speakCoachTip(text) {
-  if (!state.settings.voiceTips) return;
+function speakText(text) {
   if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
   const synth = window.speechSynthesis;
   try {
@@ -2145,6 +2219,11 @@ function speakCoachTip(text) {
   } catch {
     // 浏览器不支持或尚未获得播放权限时，保留文字提示即可
   }
+}
+
+function speakCoachTip(text) {
+  if (!state.settings.voiceTips) return;
+  speakText(text);
 }
 
 function stopCoachVoice() {
@@ -2178,8 +2257,218 @@ function hideCoachTip() {
   stopCoachVoice();
 }
 
+/* ---------------------------------------------------------- 语音指令（本地） */
+
+let voiceSocket = null;
+let voiceRetryTimer = 0;
+let voiceStatus = 'off';
+let voiceToastShown = false;
+
+function syncVoiceButton() {
+  const button = $('voice-btn');
+  if (!button) return;
+  const enabled = state.settings.voiceCommands !== false;
+  button.setAttribute('aria-pressed', String(enabled));
+  button.classList.toggle('is-live', enabled && voiceStatus === 'listening');
+  button.title = enabled
+    ? voiceStatus === 'listening'
+      ? '语音助手：监听中，说「小教练」+ 指令'
+      : `语音助手：${voiceStatus}`
+    : '语音助手已关闭';
+}
+
+function connectVoice() {
+  if (!state.settings.voiceCommands) return;
+  if (voiceSocket && (voiceSocket.readyState === WebSocket.OPEN || voiceSocket.readyState === WebSocket.CONNECTING)) {
+    if (voiceSocket.readyState === WebSocket.OPEN) sendVoiceControl(true);
+    return;
+  }
+  clearTimeout(voiceRetryTimer);
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  const socket = new WebSocket(`${protocol}://${location.host}/ws/voice`);
+  voiceSocket = socket;
+
+  socket.addEventListener('open', () => {
+    sendVoiceControl(true);
+    sendVoiceTitles();
+    if (!voiceToastShown) {
+      voiceToastShown = true;
+      toast('语音助手已连接，说「小教练」+ 指令试试');
+    }
+  });
+  socket.addEventListener('message', (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    handleVoiceMessage(message);
+  });
+  socket.addEventListener('close', () => {
+    voiceSocket = null;
+    voiceStatus = 'off';
+    if (state.settings.voiceCommands) {
+      voiceRetryTimer = setTimeout(connectVoice, 2500);
+    }
+  });
+  socket.addEventListener('error', () => {
+    voiceStatus = 'error';
+  });
+}
+
+function sendVoiceControl(enabled) {
+  if (voiceSocket && voiceSocket.readyState === WebSocket.OPEN) {
+    voiceSocket.send(JSON.stringify({ type: 'set_enabled', value: enabled }));
+  }
+}
+
+function sendVoiceTitles() {
+  if (!voiceSocket || voiceSocket.readyState !== WebSocket.OPEN) return;
+  const titles = [...new Set((state.videos || []).map((video) => video.title).filter(Boolean))];
+  voiceSocket.send(JSON.stringify({ type: 'sync_titles', titles }));
+}
+
+function disableVoice() {
+  // 保持连接以便再次开启；后端收到 false 会立即停掉麦克风
+  clearTimeout(voiceRetryTimer);
+  sendVoiceControl(false);
+  voiceStatus = 'paused';
+  syncVoiceButton();
+}
+
+function handleVoiceMessage(message) {
+  if (message.type === 'status') {
+    voiceStatus = message.state || 'unknown';
+    syncVoiceButton();
+    if (voiceStatus === 'error' && message.detail) {
+      toast(`语音助手不可用：${message.detail}`);
+    }
+    return;
+  }
+  if (message.type === 'reply') {
+    if (state.settings.voiceTips && message.text) speakText(message.text);
+    return;
+  }
+  if (message.type === 'asr') {
+    console.info(`[语音] ${message.text}（${message.asr_ms}ms）`);
+    return;
+  }
+  if (message.type === 'command') {
+    runVoiceCommand(message).catch((error) => console.warn('语音指令执行失败', error));
+  }
+}
+
+function normalizeVoiceText(text) {
+  return String(text || '').toLowerCase().replace(/[^0-9a-z\u4e00-\u9fff]/g, '');
+}
+
+function voiceSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) return 0.92;
+  const grams = (text) => {
+    const map = new Map();
+    for (let i = 0; i < text.length - 1; i += 1) {
+      const key = text.slice(i, i + 2);
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return map;
+  };
+  const left = grams(a);
+  const right = grams(b);
+  let overlap = 0;
+  let total = 0;
+  left.forEach((count, key) => {
+    total += count;
+    overlap += Math.min(count, right.get(key) || 0);
+  });
+  right.forEach((count) => { total += count; });
+  return total ? (overlap * 2) / total : 0;
+}
+
+function findVideoByVoice(query) {
+  const target = normalizeVoiceText(query);
+  if (!target) return null;
+  let best = null;
+  let bestScore = 0;
+  for (const video of state.videos || []) {
+    const score = voiceSimilarity(target, normalizeVoiceText(video.title));
+    if (score > bestScore) {
+      best = video;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 0.45 ? best : null;
+}
+
+async function runVoiceCommand(message) {
+  const action = message.action;
+
+  if (action === 'play_video') {
+    let meta =
+      (state.videos || []).find((video) => video.id === message.video_id) ||
+      (state.remoteVideos || []).find((video) => video.id === message.video_id);
+    if (!meta && message.video_id) {
+      try {
+        meta = await api.getVideo(message.video_id);
+      } catch {
+        meta = null;
+      }
+    }
+    if (!meta && message.video) meta = findVideoByVoice(message.video);
+    if (!meta) {
+      toast(`没有找到「${message.video || ''}」`);
+      return;
+    }
+    await selectVideo(meta);
+    navigate('#/learning');
+    playSegment(0);
+    return;
+  }
+
+  if (action === 'start_practice') {
+    if (!state.video) return;
+    navigate('#/learning');
+    playSegment(state.current || 0);
+    return;
+  }
+
+  if (action === 'pause') {
+    teachVideo.pause();
+    return;
+  }
+
+  if (action === 'resume') {
+    if (state.route !== 'learning' || !state.video) return;
+    const segment = state.segments[state.current];
+    if (segment && teachVideo.currentTime >= segmentEndOf(segment) - 0.02) {
+      segmentEndLocked = false;
+      teachVideo.currentTime = segment.start || 0;
+    }
+    teachVideo.play().catch(() => {});
+    return;
+  }
+
+  if (!['next_segment', 'prev_segment', 'restart_segment'].includes(action)) return;
+  if (!state.video || !state.segments.length) return;
+  if (state.route !== 'learning') navigate('#/learning');
+  const total = state.segments.length;
+  if (action === 'restart_segment') playSegment(state.current || 0);
+  else if (action === 'next_segment') playSegment((state.current + 1) % total);
+  else playSegment((state.current - 1 + total) % total);
+}
+
 // 调试钩子：便于自动化验证部位判定与文案方向（不参与业务逻辑）
 window.__coachTest = { analyzeRegions, tipTextFor, TIP_REGIONS };
+window.__voiceTest = {
+  handleVoiceMessage,
+  runVoiceCommand,
+  connectVoice,
+  findVideoByVoice,
+  get status() { return voiceStatus; },
+  get socketState() { return voiceSocket ? voiceSocket.readyState : -1; },
+};
 
 /** 挑覆盖最差的部位给一条提示；全部贴合时偶尔鼓励一句。 */
 function maybeCoachTip(regions) {
@@ -3315,6 +3604,7 @@ function renderSettings() {
     { key: 'skeleton', label: '默认显示骨架', type: 'toggle', value: state.settings.skeleton },
     { key: 'shadows', label: '默认显示人物阴影', type: 'toggle', value: state.settings.shadows },
     { key: 'voiceTips', label: '小教练语音提示', type: 'toggle', value: state.settings.voiceTips !== false },
+    { key: 'voiceCommands', label: '语音指令（唤醒词：小教练）', type: 'toggle', value: state.settings.voiceCommands !== false },
     { key: 'showPerf', label: '显示性能面板（调试）', type: 'toggle', value: state.settings.showPerf === true },
     {
       key: 'countdown',
@@ -3379,6 +3669,10 @@ function applySetting(key, rawValue) {
   } else if (key === 'voiceTips') {
     syncVisButtons();
     if (!value) stopCoachVoice();
+  } else if (key === 'voiceCommands') {
+    syncVoiceButton();
+    if (value) connectVoice();
+    else disableVoice();
   } else if (key === 'showPerf') {
     localStorage.setItem(PERF_KEY, value ? '1' : '0');
     syncPerfHud();
@@ -3432,6 +3726,12 @@ function bindEvents() {
 
   [$('theme-toggle'), $('cover-theme')].forEach((button) => {
     button.addEventListener('click', toggleTheme);
+  });
+
+  $('voice-btn').addEventListener('click', () => {
+    const next = state.settings.voiceCommands === false;
+    applySetting('voiceCommands', next);
+    toast(next ? '语音助手已开启，说「小教练」试试' : '语音助手已关闭');
   });
 
   $('rail-open').addEventListener('click', openRail);
@@ -3951,9 +4251,11 @@ function init() {
   renderErrorRibbon(null);
   setConn(false, '未连接');
   initPerfHud();
+  connectVoice();
+  syncVoiceButton();
 
   applyRoute();
-  loadLibrary();
+  loadLibrary().then(sendVoiceTitles, sendVoiceTitles);
   hydrateLocalCourses();
   refreshSessions(false);
   requestAnimationFrame(overlayLoop);

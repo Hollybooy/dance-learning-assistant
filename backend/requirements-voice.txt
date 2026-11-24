@@ -1,0 +1,5 @@
+# 可选：本地语音助手（麦克风 + Whisper）
+# 安装：backend\.venv\Scripts\python.exe -m pip install -r requirements-voice.txt
+faster-whisper>=1.2
+sounddevice>=0.5
+# 说明：Ollama 与 Qwen 模型不通过 pip 安装，见 .env.example 的 DANCEMATE_OLLAMA_* 配置

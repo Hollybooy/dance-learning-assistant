@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-import urllib.request
 from pathlib import Path
 
 from ..config import BACKEND_DIR
+from .net_download import fetch_file, url_candidates
 
 MODEL_DIR = BACKEND_DIR / "models"
 
@@ -45,43 +45,21 @@ def ensure_pose_model(variant: str = "lite") -> Path:
     name, url = _MODELS.get(variant, _MODELS["lite"])
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     target = MODEL_DIR / name
-    if target.exists() and target.stat().st_size > 0:
-        return target
-
-    tmp = target.with_suffix(".tmp")
-    try:
-        with urllib.request.urlopen(url, timeout=60) as response, open(tmp, "wb") as out:
-            while True:
-                chunk = response.read(256 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-        tmp.replace(target)
-    except Exception as exc:  # noqa: BLE001
-        tmp.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"姿态模型下载失败，请手动下载 {name} 放到 {MODEL_DIR}：{exc}"
-        ) from exc
-    return target
+    return fetch_file(
+        url_candidates(url),
+        target,
+        timeout=60,
+        hint=f"姿态模型 {name}（也可手动下载放到 {MODEL_DIR}）",
+    )
 
 
 def _download(target: Path, url: str, hint: str) -> Path:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.stat().st_size > 0:
-        return target
-    tmp = target.with_suffix(".tmp")
-    try:
-        with urllib.request.urlopen(url, timeout=180) as response, open(tmp, "wb") as out:
-            while True:
-                chunk = response.read(256 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-        tmp.replace(target)
-    except Exception as exc:  # noqa: BLE001
-        tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"{hint} 下载失败，可手动下载后放到 {target}：{exc}") from exc
-    return target
+    return fetch_file(
+        url_candidates(url),
+        target,
+        timeout=180,
+        hint=f"{hint}（也可手动下载放到 {target}）",
+    )
 
 
 def ensure_onnx_pose_models() -> tuple[Path, Path]:

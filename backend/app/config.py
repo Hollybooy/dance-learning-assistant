@@ -33,14 +33,23 @@ POSE_BACKEND = os.getenv("DANCEMATE_POSE_BACKEND", "auto").strip().lower()
 ORT_PROVIDER = os.getenv("DANCEMATE_ORT_PROVIDER", "dml").strip().lower()
 
 # ONNX 后端每隔多少帧重跑一次人体检测（中间帧沿用上一帧的 ROI，降低耗时）
-ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "2")))
+ORT_DETECT_INTERVAL = max(1, int(os.getenv("DANCEMATE_ORT_DETECT_INTERVAL", "6")))
 
 # 人物阴影来源：blazepose（与骨架同一次推理，默认）或 yolo（YOLO26n-seg）
 MASK_BACKEND = os.getenv("DANCEMATE_MASK_BACKEND", "yolo").strip().lower()
 
 # YOLO 分割模型输入尺寸与更新间隔（按帧计，中间帧复用上一张掩码）
 YOLO_IMGSZ = int(os.getenv("DANCEMATE_YOLO_IMGSZ", "640"))
-YOLO_MASK_INTERVAL = max(1, int(os.getenv("DANCEMATE_YOLO_MASK_INTERVAL", "3")))
+YOLO_MASK_INTERVAL = max(1, int(os.getenv("DANCEMATE_YOLO_MASK_INTERVAL", "2")))
+
+# 本地语音助手：麦克风常驻 + 唤醒词 + faster-whisper + Ollama 意图解析
+VOICE_ENABLED = os.getenv("DANCEMATE_VOICE", "1").strip() != "0"
+VOICE_WAKE_WORD = os.getenv("DANCEMATE_WAKE_WORD", "小教练").strip() or "小教练"
+VOICE_SAMPLE_RATE = 16000
+WHISPER_MODEL = os.getenv("DANCEMATE_WHISPER_MODEL", "whisper-base").strip()
+WHISPER_COMPUTE = os.getenv("DANCEMATE_WHISPER_COMPUTE", "int8").strip()
+OLLAMA_URL = os.getenv("DANCEMATE_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("DANCEMATE_OLLAMA_MODEL", "qwen2.5:1.5b-instruct").strip()
 
 # 关键点可见度阈值
 POSE_MIN_VISIBILITY = float(os.getenv("DANCEMATE_POSE_MIN_VIS", "0.3"))

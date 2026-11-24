@@ -53,8 +53,14 @@ class OnnxPoseEngine:
         self._masker = None
         self._mask_png: Optional[bytes] = None
         self._since_mask = 0
+        self._mask_pending = False
+        self._mask_generation = 0
+        self._mask_misses = 0
+        self._pose_misses = 0
         self._lock = threading.Lock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=name)
+        # 阴影单独一个线程：YOLO 比骨架贵，异步更新，避免拖慢每帧的关键点返回
+        self._mask_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"{name}-mask")
         self.providers: List[str] = []
 
     def _ensure_model(self) -> None:
@@ -105,18 +111,46 @@ class OnnxPoseEngine:
         self._person = persons[int(np.argmax(persons[:, 12]))]
         return self._person
 
+    def _person_from_pose(self, pose, width: int, height: int):
+        """用上一帧骨架的可见点包围盒推算 ROI，跟踪移动，减少检测器调用次数。"""
+        points = [
+            np.array([x * width, y * height], dtype=np.float32)
+            for x, y, _z, visibility in pose
+            if visibility >= 0.3
+        ]
+        if len(points) < 6:
+            return None
+        array = np.stack(points)
+        low, high = array.min(axis=0), array.max(axis=0)
+        center = (low + high) / 2
+        side = max(float(np.max(high - low)), 24.0) * 1.35
+        person = np.zeros(13, dtype=np.float32)
+        person[4:6] = center
+        # 检测器格式里 ROI 边长 = 2 ×(髋部到全身点的距离)
+        person[6:8] = center + np.array([0.0, side / 2], dtype=np.float32)
+        person[12] = 1.0
+        return person
+
     def _infer(self, frame_bgr: np.ndarray):
         self._ensure_model()
         height, width = frame_bgr.shape[:2]
         person = self._detect_person(frame_bgr)
         if person is None:
-            self._reset_mask()
-            return None, None
+            self._mask_misses += 1
+            if self._mask_misses >= 6:
+                self._reset_mask()
+            return None, self._mask_png
         result = self._pose.infer(frame_bgr, person)
         if result is None:
-            self._person = None  # 姿态失败，下一帧强制重新检测
-            self._reset_mask()
-            return None, None
+            self._pose_misses += 1
+            if self._pose_misses >= 2:
+                self._person = None  # 连续失败才重新检测，避免检测器抖动
+            self._mask_misses += 1
+            if self._mask_misses >= 6:
+                self._reset_mask()
+            return None, self._mask_png
+        self._mask_misses = 0
+        self._pose_misses = 0
         _bbox, landmarks, _world, mask, _heatmap, _conf = result
         pose = [
             [
@@ -127,28 +161,44 @@ class OnnxPoseEngine:
             ]
             for x, y, z, visibility, _presence in landmarks[:-6]
         ]
+        tracked = self._person_from_pose(pose, width, height)
+        if tracked is not None:
+            self._person = tracked
         if not self._with_segmentation:
             return pose, None
         if self._masker is None:
             return pose, self._encode_mask(mask)
-        # YOLO 掩码较贵：按间隔更新，中间帧沿用上一张，避免每帧都多付推理时间
-        if self._mask_png is None or self._since_mask >= YOLO_MASK_INTERVAL:
-            fresh = self._masker.mask_png(frame_bgr, self.MASK_SIZE)
+        # YOLO 放到后台线程更新：本帧立即返回最新缓存，不再阻塞关键点
+        if not self._mask_pending and (self._mask_png is None or self._since_mask >= YOLO_MASK_INTERVAL):
+            self._mask_pending = True
             self._since_mask = 0
-            if fresh is not None:
-                self._mask_png = fresh
+            self._mask_executor.submit(self._update_mask, frame_bgr.copy(), self._mask_generation)
         else:
             self._since_mask += 1
         return pose, self._mask_png
 
+    def _update_mask(self, frame_bgr: np.ndarray, generation: int) -> None:
+        try:
+            fresh = self._masker.mask_png(frame_bgr, self.MASK_SIZE)
+            if fresh is not None and generation == self._mask_generation:
+                self._mask_png = fresh
+        except Exception:  # noqa: BLE001
+            logger.exception("YOLO 人物阴影推理失败")
+        finally:
+            self._mask_pending = False
+
     def _reset_mask(self) -> None:
+        # 让仍在跑的阴影任务作废，避免旧画面的掩码写回新会话
+        self._mask_generation += 1
         self._mask_png = None
         self._since_mask = 0
+        self._mask_misses = 0
 
     def reset_tracking(self) -> None:
         """新的练习会话开始时清掉上一段的 ROI 与阴影缓存。"""
         self._person = None
         self._since_detect = 0
+        self._pose_misses = 0
         self._reset_mask()
 
     # ---------- 同步接口 ----------
@@ -207,3 +257,4 @@ class OnnxPoseEngine:
         self._pose = None
         self._det = None
         self._executor.shutdown(wait=False)
+        self._mask_executor.shutdown(wait=False)

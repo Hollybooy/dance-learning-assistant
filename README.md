@@ -37,6 +37,11 @@ python run.py
 >
 > 国内网络安装依赖可加镜像：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`
 >
+> 模型下载默认走「镜像直连 → 官方直连 → 镜像/官方 + 本机代理」（见 `backend/app/services/net_download.py`）：
+> `python download_onnx_models.py` 拉 ONNX 模型（GitHub 镜像）、`python download_whisper_model.py`
+> 拉语音模型（hf-mirror）。代理默认探测 `127.0.0.1:7890`，需要时用 `DANCEMATE_PROXY` 指定，
+> 想强制纯直连可设 `DANCEMATE_NO_PROXY=1`。依赖统一用清华源直连安装，通常比走代理更快。
+>
 > 实测（本机 CPU，640x480 输入）：单帧推理约 16ms，WebSocket 往返约 17ms。
 >
 > 上传的视频会自动用内置 ffmpeg（imageio-ffmpeg）转码为 **H.264 + AAC + faststart**：
@@ -142,6 +147,34 @@ python run.py
 5. 两边剪影落在同一坐标系后，按 96×96 栅格算 IoU，实时显示重合百分比；
 6. 回放页用录制时保存的逐帧骨架，按录制时长与片段时长的比例映射教学时间轴，实现"教学轮廓映射在人物动作回放上"。
 
+## 语音指令（可选，需麦克风）
+
+页面打开后前端连 `/ws/voice`，后端才开始录音（关掉页面即停，不后台常驻）。链路是：
+能量 VAD 切句 → faster-whisper（CPU int8）识别中文 → 必须含唤醒词「小教练」→
+固定指令走规则解析，播放某个课程这类模糊意图交给 Ollama 上的 Qwen2.5-1.5B 输出 JSON。
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pip install -r requirements-voice.txt   # faster-whisper + sounddevice
+.\.venv\Scripts\python.exe download_whisper_model.py                  # 默认 whisper-base，走 hf-mirror
+```
+
+Ollama 与模型不走 pip：
+
+```powershell
+ollama pull qwen2.5:1.5b-instruct
+```
+
+> **国内下载实测**：Ollama 官方 registry 直连约 285–328 KB/s，走 7890 代理只有 14 KB/s（慢 20 倍以上），
+> 986MB 直连约 50 分钟。更快的是 ModelScope：同一个 Qwen2.5-1.5B q4_k_m GGUF 直连 **8.8 MB/s**，
+> 1.04GB 约 2 分钟下完，写个 `FROM ./qwen2.5-1.5b-instruct-q4_k_m.gguf` 的 Modelfile，
+> 再 `ollama create qwen2.5:1.5b-instruct -f Modelfile` 即可（模板/系统提示可从 registry 同 tag 的
+> `application/vnd.ollama.image.template` / `...system` 层取）。
+
+可用指令：暂停 / 继续播放 / 上一片段 / 下一片段 / 重播本段 / 开始跟练 / 播放〈课程名〉。
+`/api/voice/status` 会返回 `disabled / paused / loading / listening / error` 之一；
+没麦克风、没装依赖或 Ollama 没启动都不影响跟练：前端静默降级，意图解析自动回退规则 + 标题模糊匹配。
+
 ## 目录结构
 
 ```
@@ -171,6 +204,7 @@ dance-learning-assistant/
 │   │   ├── api/videos.py      # 上传/切片/搜索/Range 播放/骨架分析
 │   │   ├── api/sessions.py    # 回放列表与详情
 │   │   ├── api/ws_practice.py # 实时骨架 + 录制
+│   │   ├── api/voice.py       # 语音状态 + 指令推送（/ws/voice）
 │   │   └── services/
 │   │       ├── pose_engine.py    # MediaPipe 封装（串行、单帧）
 │   │       ├── teach_pose.py     # 教学视频离线骨架提取
@@ -282,6 +316,15 @@ WebSocket 协议：
 | `DANCEMATE_POSE_COMPLEXITY` | 0 | 0=Lite，1=Full（更准但更慢） |
 | `DANCEMATE_MAX_UPLOAD_MB` | 800 | 上传大小上限 |
 | `DANCEMATE_DATA_DIR` | `backend/data` | 数据目录 |
+| `DANCEMATE_VOICE` | 1 | 0 关闭语音助手 |
+| `DANCEMATE_WAKE_WORD` | 小教练 | 唤醒词 |
+| `DANCEMATE_WHISPER_MODEL` | whisper-base | 模型目录名，可换 whisper-small |
+| `DANCEMATE_WHISPER_COMPUTE` | int8 | CTranslate2 计算类型 |
+| `DANCEMATE_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 地址 |
+| `DANCEMATE_OLLAMA_MODEL` | qwen2.5:1.5b-instruct | 意图解析模型 |
+| `DANCEMATE_PROXY` | 自动探测 `127.0.0.1:7890` | 模型下载代理（仅镜像/官方源都慢时使用）|
+| `DANCEMATE_HF_ENDPOINT` | `https://hf-mirror.com` | HuggingFace 镜像 |
+| `DANCEMATE_NO_PROXY` | — | 设为 1 只直连，不做代理回退 |
 
 ## 后续可优化
 

@@ -1,6 +1,6 @@
 # DanceMate 开发日志
 
-> 记录周期：2026-11-03 21:20 ~ 2026-11-10 14:57（8 天，24 次提交）
+> 记录周期：2026-11-03 21:20 ~ 2026-11-24 22:40（22 天，38 次提交）
 > 代码规模：22 个源文件 / 3757 行（Python 1272 · JavaScript 1787 · CSS 526 · HTML 172）
 
 ---
@@ -154,3 +154,46 @@
 3. **骨架推理仍在 CPU**（单帧 18–28ms）。上 GPU 需 MediaPipe GPU delegate（Windows 下不稳）或改浏览器内 WebGL 推理（架构级改动）。
 4. **旧录制无掩码**：早期回放只有骨架，自动降级，不回填。
 5. 实时链路为**单引擎串行**，多标签页同时跟练会互相排队。
+
+---
+
+## 七、语音助手指令（2026-11-24）
+
+### 链路
+
+```
+麦克风 16kHz 单声道 ──▶ 能量 VAD 切句 ──▶ faster-whisper（CPU int8，中文）
+                                              │
+                                     必须含唤醒词「小教练」
+                                              │
+                        ┌─────────────────────┴─────────────────────┐
+                   固定指令（规则，<1ms）                   模糊意图（Ollama Qwen2.5-1.5B → JSON）
+                        └─────────────────────┬─────────────────────┘
+                                    /ws/voice 推给前端执行
+```
+
+- 录音只在页面连上 `/ws/voice` 后开启，页面关掉即停（不后台常驻，避免隐私与占用）。
+- 状态机 `disabled / paused / loading / listening / error`，`/api/voice/status` 可查；
+  没麦克风、缺依赖、Ollama 没启动都不影响跟练，前端静默降级，意图解析回退规则 + 标题模糊匹配。
+- Whisper 模型落在 `backend/models/<模型名>`，启动时后台线程预热，第一次连页面不用等模型下载。
+
+### 模型下载路由（国内网络实测）
+
+统一走 `services/net_download.py`：**镜像直连 → 官方直连 → 镜像/官方 + 代理**，
+直连用空 `ProxyHandler` 显式绕过系统代理，代理默认探测 `127.0.0.1:7890`。
+
+| 源 | 直连 | 走 7890 代理 | 986MB 模型耗时 |
+|----|------|--------------|----------------|
+| registry.ollama.ai（官方） | 285–328 KB/s | 14 KB/s | 直连约 50 分钟 |
+| ModelScope（Qwen2.5-1.5B GGUF） | **8.8 MB/s** | — | 1.04GB 约 2 分钟 |
+| hf-mirror.com（Whisper） | 可用，秒级完成小文件 | — | 145MB 约 20 秒 |
+
+结论：从 Ollama 官方 registry 拉模型**关代理直连**更快；嫌慢就直接用 ModelScope 的 GGUF
++ Modelfile 本地导入。pip 依赖统一走清华源直连。
+
+### 其他改动
+
+- `ORT_DETECT_INTERVAL` 默认 2 → 6（人体检测隔 6 帧重跑，中间帧复用 ROI）；
+  `YOLO_MASK_INTERVAL` 默认 3 → 2（阴影更跟手）。
+- `download_onnx_models.py` / `download_whisper_model.py`：一条命令拉齐模型，失败自动换路由。
+- Whisper 模型 id 修正：`whisper-base` 之前会被拼成 `Systran/faster-whisper-whisper-base`。
