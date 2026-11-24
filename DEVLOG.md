@@ -206,6 +206,14 @@
 - 指令回复统一由 `runVoiceCommand` 收口：分支自己播报的返回 `'silent'`，其余沿用后端 `_ACTION_REPLY`，
   避免「开始录制」被说两遍。
 
+### 教程自动连播（同日）
+
+- 跟练页操作条新增「自动播放 / 手动播放」chip（`#autoplay-toggle`），默认自动，选择存 `localStorage`；
+  设置面板里也有「教程自动连播」开关，两处共用 `settings.autoplay`。
+- 自动：本段播完 → 角标提示「即将自动播放第 N 段」→ 0.9 秒后 `playSegment(next)`，最后一段提示「全部片段已完成」。
+- 手动：保持原先「停在原地等你切换」的行为。
+- 录制、手动切段、离开页面都会先 `clearTimeout(autoplayTimer)`，避免定时器把人从录制里拽走。
+
 ### 其他改动
 
 - `ORT_DETECT_INTERVAL` 默认 2 → 6，后因跟手问题改回 3（中间帧复用 ROI）；

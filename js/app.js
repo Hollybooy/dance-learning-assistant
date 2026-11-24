@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS = {
   dockDelay: 1500,
   voiceTips: true,
   voiceCommands: true,
+  autoplay: true,
   coachVoice: 'auto',
   coachRate: 0.98,
   showPerf: false,
@@ -1470,10 +1471,13 @@ function seekFromPointer(event) {
 let segmentPlayToken = 0;
 let segmentTransition = false;
 let segmentEndLocked = false;
+let autoplayTimer = 0; // 自动连播的延迟跳段计时器
 
 async function playSegment(index) {
   const segment = state.segments[index];
   if (!segment) return;
+  clearTimeout(autoplayTimer); // 手动切段时取消待执行的自动跳转
+  autoplayTimer = 0;
   const token = ++segmentPlayToken;
   segmentTransition = true;
   state.current = index;
@@ -1528,13 +1532,37 @@ function handleSegmentEnd(fromEnded = false) {
     live.sendRecordStop();
     return;
   }
-  if (state.segments.length) {
-    // 本段播完停在原地，等用户手动选下一段；保持控制条可见
-    showDock();
-    clearTimeout(dockHideTimer);
-    setTeachBadge('本段结束 · 手动切下一段');
-    speakCoachTip('这一段完成，选下一段继续');
+  if (!state.segments.length) return;
+
+  // 保持控制条可见，避免自动连播时用户没法调整
+  showDock();
+  clearTimeout(dockHideTimer);
+
+  const isLast = state.current >= state.segments.length - 1;
+  const autoplay = state.settings.autoplay !== false;
+
+  if (autoplay && !isLast) {
+    const next = state.current + 1;
+    setTeachBadge(`本段结束 · 即将自动播放第 ${next + 1} 段`);
+    speakCoachTip('这一段完成，自动进入下一段');
+    clearTimeout(autoplayTimer);
+    autoplayTimer = window.setTimeout(() => {
+      autoplayTimer = 0;
+      // 期间可能已经手动切段/开始录制/离开页面，这里再确认一次
+      if (state.route !== 'learning' || state.recording || state.current !== next - 1) return;
+      playSegment(next);
+    }, 900);
+    return;
   }
+
+  if (autoplay && isLast) {
+    setTeachBadge('全部片段已完成');
+    speakCoachTip('全部片段都跳完了，休息一下');
+    return;
+  }
+
+  setTeachBadge('本段结束 · 手动切下一段');
+  speakCoachTip('这一段完成，选下一段继续');
 }
 
 /** 切到某一段时播报一次；顺便重置「轮廓贴合」的夸奖状态 */
@@ -3876,6 +3904,12 @@ function renderSettings() {
   const dark = document.documentElement.dataset.theme === 'dark';
   const rows = [
     {
+      key: 'autoplay',
+      label: '教程自动连播',
+      type: 'toggle',
+      value: state.settings.autoplay !== false,
+    },
+    {
       key: 'speed',
       label: '默认播放倍速',
       type: 'select',
@@ -3965,6 +3999,13 @@ function applySetting(key, rawValue) {
   } else if (key === 'shadows') {
     state.shadows = value;
     syncVisButtons();
+  } else if (key === 'autoplay') {
+    // 切到手动时，把已经排队的自动跳段取消掉
+    if (!value) {
+      clearTimeout(autoplayTimer);
+      autoplayTimer = 0;
+    }
+    syncAutoplayButton();
   } else if (key === 'voiceTips') {
     syncVisButtons();
     if (!value) stopCoachVoice();
@@ -4209,6 +4250,11 @@ function bindEvents() {
     saveSettings();
     syncVisButtons();
   });
+  $('autoplay-toggle').addEventListener('click', () => {
+    const next = state.settings.autoplay === false;
+    applySetting('autoplay', next);
+    toast(next ? '自动播放：本段结束自动进入下一段' : '手动播放：本段结束停在原地等你切换');
+  });
   $('voice-toggle').addEventListener('click', () => {
     applySetting('voiceTips', !state.settings.voiceTips);
     toast(state.settings.voiceTips ? '已开启语音提示' : '已关闭语音提示');
@@ -4253,6 +4299,9 @@ function bindEvents() {
       return;
     }
     if (countdownActive) return;
+    // 录制期间不允许自动跳段，先把排队的跳转取消
+    clearTimeout(autoplayTimer);
+    autoplayTimer = 0;
 
     // 需求：点击开始录制后立即切换为左右分屏（左教学 / 右摄像头）
     enterRecordingLayout();
@@ -4531,6 +4580,21 @@ function syncVisButtons() {
   const voiceOn = state.settings.voiceTips !== false;
   voiceBtn.classList.toggle('is-on', voiceOn);
   voiceBtn.setAttribute('aria-pressed', String(voiceOn));
+
+  syncAutoplayButton();
+}
+
+/** 自动/手动播放按钮：文字与高亮都跟着设置走 */
+function syncAutoplayButton() {
+  const btn = $('autoplay-toggle');
+  if (!btn) return;
+  const on = state.settings.autoplay !== false;
+  btn.classList.toggle('is-on', on);
+  btn.textContent = on ? '自动播放' : '手动播放';
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on
+    ? '本段播完自动进入下一段，点击改成手动'
+    : '本段播完停在原地等你切换，点击改成自动';
 }
 
 /* ------------------------------------------------------------------ 启动 */
